@@ -19,11 +19,14 @@ static inline async_fn<void> notify_flag(std::atomic<bool>& atomic_flag) {
 } // namespace detail
 
 // run an awaitable but do not suspend current coroutine (and do not care about
-// its return value), useful for running awaitable in non-coroutines
-// returns true if the awaitable asked for a suspension
-template <typename AwaitableT, typename... ArgTs>
-static inline bool unleash(ArgTs... args) {
-    return await_with_caller(AwaitableT(std::forward<ArgTs>(args)...), std::noop_coroutine());
+// its return value), useful for running awaitable in non-coroutines returns
+// true if the awaitable asked for a suspension
+// 
+// NOTE: input awaitable should be rvalue reference, which means it should not
+// be used for other purposes
+template <typename AwaitableT> requires std::is_rvalue_reference_v<AwaitableT&&>
+static inline bool unleash(AwaitableT&& awaitable) {
+    return await_with_caller(std::forward<AwaitableT>(awaitable), std::noop_coroutine());
 }
 
 // manage awaitables in synchronous functions
@@ -41,6 +44,11 @@ struct controlled {
     void join() { if (caller_suspend) { completed.wait(false); } }
     auto result() { return await_expr_value(wrapped); }
 };
+
+template <typename AwaitableT>
+auto controlled_of(AwaitableT&& awaitable) {
+    return controlled<AwaitableT>(std::forward<AwaitableT>(awaitable));
+}
 
 // function shortcut
 template <typename AwaitableT, typename... ArgTs>
