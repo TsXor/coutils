@@ -17,7 +17,7 @@ template <typename T>  using replace_empty_t = replace_empty<T>::type;
 
 template <typename AwaitableT>
 static inline auto await_expr_replace_empty(AwaitableT&& awaitable) {
-    if constexpr (std::is_void_v<awaitable_traits_of<AwaitableT>::await_expr_type>) {
+    if constexpr (std::is_void_v<typename awaitable_traits_of<AwaitableT>::await_expr_type>) {
         return empty_slot;
     } else {
         return await_expr_value(std::forward<AwaitableT>(awaitable));

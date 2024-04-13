@@ -3,6 +3,7 @@
 #define __COUTILS_DETAIL_AWAITABLE_TRAITS__
 
 #include <coroutine>
+#include <type_traits>
 
 namespace coutils {
 
@@ -17,7 +18,7 @@ struct awaitable_traits {
 };
 
 template <typename T>
-using awaitable_traits_of = awaitable_traits<std::remove_reference_t<T>>;
+using awaitable_traits_of = awaitable_traits<std::remove_cvref_t<T>>;
 
 template <typename AwaitableT>
     requires awaitable_traits_of<AwaitableT>::is_void_suspend

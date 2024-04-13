@@ -44,10 +44,15 @@ struct controlled {
 
 // function shortcut
 template <typename AwaitableT, typename... ArgTs>
-static inline auto run_join(ArgTs... args) {
+static inline auto make_run_join(ArgTs... args) {
     controlled<AwaitableT> synced(std::forward<ArgTs>(args)...);
-    synced.start(); synced.join();
-    return synced.result();
+    synced.start(); synced.join(); return synced.result();
+}
+
+// function shortcut
+template <typename AwaitableT>
+static inline auto run_join(AwaitableT&& awaitable) {
+    return make_run_join<AwaitableT>(std::forward<AwaitableT>(awaitable));
 }
 
 } // namespace coutils::sync
