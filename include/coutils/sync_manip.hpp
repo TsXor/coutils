@@ -16,6 +16,12 @@ static inline async_fn<void> notify_flag(std::atomic<bool>& atomic_flag) {
     co_return;
 }
 
+template <typename T>
+static inline async_fn<void> deleter(T* ptr) {
+    delete ptr;
+    co_return;
+}
+
 } // namespace detail
 
 // run an awaitable but do not suspend current coroutine (and do not care about
@@ -27,6 +33,18 @@ static inline async_fn<void> notify_flag(std::atomic<bool>& atomic_flag) {
 template <typename AwaitableT> requires std::is_rvalue_reference_v<AwaitableT&&>
 static inline bool unleash(AwaitableT&& awaitable) {
     return await_with_caller(std::forward<AwaitableT>(awaitable), std::noop_coroutine());
+}
+
+// if you write something like `unleash([&]()->async_fn<T>{...}())`, you will
+// commit use after free because the lambda object is destroyed after `unleash`
+// returned
+// this function solves this problem by moving the lambda to heap to expand
+// its lifetime to the same as coroutine, use it like
+// `unleash_lambda([&]()->async_fn<T>{...})`
+template <typename LambdaT> requires std::is_rvalue_reference_v<LambdaT&&>
+static inline bool unleash_lambda(LambdaT&& lambda) {
+    auto persist = new LambdaT(std::forward<LambdaT>(lambda));
+    return await_with_caller((*persist)(), detail::deleter(persist));
 }
 
 // manage awaitables in synchronous functions
