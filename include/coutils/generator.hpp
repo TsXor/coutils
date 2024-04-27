@@ -1,6 +1,6 @@
 #pragma once
-#ifndef __COUTILS_DETAIL_GENERATOR__
-#define __COUTILS_DETAIL_GENERATOR__
+#ifndef __COUTILS_GENERATOR__
+#define __COUTILS_GENERATOR__
 
 #include <coroutine>
 #include <optional>
@@ -67,7 +67,13 @@ callee(callee_type::from_promise(callee_promise)) {
 
 template <typename T>
 inline generator<T>::~generator() {
-    if (callee && !callee.done()) { callee.promise().curval_ptr = nullptr; }
+    // When generator is `done()`, its coroutine is still
+    // in the state of waiting the result of `final_suspend()`.
+    // In such state, coroutine stack is deleted, but the
+    // promise object is still alive.
+    // That's why we need to manually call `destroy()` in the
+    // destructor of `generator` object.
+    if (callee) { callee.destroy(); }
 }
 
 template <typename T>
@@ -87,4 +93,4 @@ inline generator<T>::iterator generator<T>::begin() {
 
 } // namespace coutils
 
-#endif // __COUTILS_DETAIL_GENERATOR__
+#endif // __COUTILS_GENERATOR__

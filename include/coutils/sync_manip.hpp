@@ -3,22 +3,27 @@
 #define __COUTILS_SYNC_MANIP___
 
 #include <atomic>
-#include "coutils/async_fn.hpp"
+#include "coutils/detached_fn.hpp"
 #include "coutils/awaitable_traits.hpp"
 
 namespace coutils::sync {
 
 namespace detail {
 
-static inline async_fn<void> notify_flag(std::atomic<bool>& atomic_flag) {
+static inline detached_fn notify_flag(std::atomic<bool>& atomic_flag) {
     atomic_flag = true;
     atomic_flag.notify_all();
     co_return;
 }
 
 template <typename T>
-static inline async_fn<void> deleter(T* ptr) {
-    delete ptr;
+T* move_to_heap(T&& obj) {
+    return new T(std::forward<T>(obj));
+}
+
+template <typename... Ts>
+static inline detached_fn deleter(Ts*... ptrs) {
+    (..., delete ptrs);
     co_return;
 }
 
@@ -27,12 +32,14 @@ static inline async_fn<void> deleter(T* ptr) {
 // run an awaitable but do not suspend current coroutine (and do not care about
 // its return value), useful for running awaitable in non-coroutines returns
 // true if the awaitable asked for a suspension
+// awaitable is moved to heap to expand its lifetime 
 // 
 // NOTE: input awaitable should be rvalue reference, which means it should not
 // be used for other purposes
 template <typename AwaitableT> requires std::is_rvalue_reference_v<AwaitableT&&>
 static inline bool unleash(AwaitableT&& awaitable) {
-    return await_with_caller(std::forward<AwaitableT>(awaitable), std::noop_coroutine());
+    auto aw_ptr = detail::move_to_heap(std::forward<AwaitableT>(awaitable));
+    return await_with_caller(*aw_ptr, detail::deleter(aw_ptr));
 }
 
 // if you write something like `unleash([&]()->async_fn<T>{...}())`, you will
@@ -43,8 +50,9 @@ static inline bool unleash(AwaitableT&& awaitable) {
 // `unleash_lambda([&]()->async_fn<T>{...})`
 template <typename LambdaT> requires std::is_rvalue_reference_v<LambdaT&&>
 static inline bool unleash_lambda(LambdaT&& lambda) {
-    auto persist = new LambdaT(std::forward<LambdaT>(lambda));
-    return await_with_caller((*persist)(), detail::deleter(persist));
+    auto lambda_ptr = detail::move_to_heap(std::forward<LambdaT>(lambda));
+    auto aw_ptr = detail::move_to_heap((*lambda_ptr)());
+    return await_with_caller(*aw_ptr, detail::deleter(aw_ptr, lambda_ptr));
 }
 
 // manage awaitables in synchronous functions

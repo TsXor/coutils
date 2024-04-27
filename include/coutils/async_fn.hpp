@@ -1,6 +1,6 @@
 #pragma once
-#ifndef __COUTILS_DETAIL_ASYNC_FN__
-#define __COUTILS_DETAIL_ASYNC_FN__
+#ifndef __COUTILS_ASYNC_FN__
+#define __COUTILS_ASYNC_FN__
 
 #include <coroutine>
 #include <optional>
@@ -69,7 +69,10 @@ callee(callee_type::from_promise(callee_promise)) {
 
 template<class T>
 inline async_fn<T>::~async_fn() {
-    if (callee && !callee.done()) { callee.promise().retval_ptr = nullptr; }
+    // Take a look as comments in `generator<T>::~generator()`.
+    // `detail::transfer_to_handle` = `std::suspend_always` + ability to transfer ownership,
+    // so `async_fn` faces the same problem as `generator`.
+    if (callee) { callee.destroy(); }
 }
 
 template<class T>
@@ -116,7 +119,7 @@ struct async_fn<void>::promise_type {
 inline async_fn<void>::async_fn(promise_type& callee_promise):
 callee(callee_type::from_promise(callee_promise)) {}
 
-inline async_fn<void>::~async_fn() {}
+inline async_fn<void>::~async_fn() { if (callee) { callee.destroy(); } }
 
 inline async_fn<void>::callee_type async_fn<void>::await_suspend(std::coroutine_handle<> ch) {
     callee.promise().caller = ch; return callee;
@@ -124,4 +127,4 @@ inline async_fn<void>::callee_type async_fn<void>::await_suspend(std::coroutine_
 
 } // namespace coutils
 
-#endif // __COUTILS_DETAIL_ASYNC_FN__
+#endif // __COUTILS_ASYNC_FN__
