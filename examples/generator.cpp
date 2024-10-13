@@ -22,7 +22,18 @@ auto fibonacci_sequence(unsigned n) -> coutils::generator<std::uint64_t> {
 }
 
 int main() {
-    for (auto v : fibonacci_sequence(10)) {
-        std::cout << v << '\n';
+    auto gen_and_print = [] (unsigned n) {
+        for (auto v : fibonacci_sequence(n)) {
+            std::cout << v << ' ';
+        }
+        std::cout << std::endl;
+    };
+
+    gen_and_print(42);
+
+    try {
+        gen_and_print(100); // throws an exception
+    } catch (const std::exception& exc) {
+        std::cerr << "Caught exception: " << exc.what() << std::endl; 
     }
 }

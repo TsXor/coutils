@@ -2,129 +2,62 @@
 #ifndef __COUTILS_ASYNC_FN__
 #define __COUTILS_ASYNC_FN__
 
-#include <coroutine>
-#include <optional>
-#include <utility>
-#include "coutils/detail/transfer_to_handle.hpp"
-#include "coutils/initializer_tuple.hpp"
+#include "coutils/common_promise.hpp"
 
 namespace coutils {
 
-// wraps coroutine like an async function, won't be executed unless you co_await it
-// `co_return coutils::inituple(...)` may be used as an equivalent of `return {...}`
-// Note: returned object will be at least constructed once and moved once.
-//       If you hate such behaviour, consider using reference parameters to output value.
 template <typename T>
-struct async_fn {
-    struct promise_type;
-    using callee_type = std::coroutine_handle<promise_type>;
-    callee_type callee;
-    std::optional<T> retval = std::nullopt;
-    
-    constexpr bool await_ready() const noexcept { return false; }
-    
-    async_fn(promise_type& callee_promise);
-    async_fn(const async_fn<T>&) = delete;
-    async_fn(async_fn<T>&& other) : callee(std::exchange(other.callee, {})),
-        retval(std::exchange(other.retval, std::nullopt)) {}
-    ~async_fn();
-
-    operator callee_type() { return callee; }
-    operator std::coroutine_handle<void>() { return callee; }
-
-    callee_type await_suspend(std::coroutine_handle<> ch);
-    T await_resume() { return *std::move(retval); }
-    void manual_resume() { callee.resume(); }
+struct async_fn_promise: common_promise<disable, disable, T> {
+    std::coroutine_handle<> caller = {};
+    decltype(auto) final_suspend() noexcept
+        { return transfer_to_handle{std::exchange(caller, {})}; }
 };
 
 template <typename T>
-struct async_fn<T>::promise_type {
-    std::coroutine_handle<> caller = std::noop_coroutine();
-    std::optional<T>* retval_ptr = nullptr;
-    
-    auto get_return_object() { return async_fn(*this); }
-    auto initial_suspend() noexcept { return std::suspend_always{}; }
-    auto final_suspend() noexcept { return detail::transfer_to_handle{caller}; }
-    
-    template <typename ReturnExprT>
-    void return_value(ReturnExprT&& expr) {
-        if (retval_ptr) {
-            if constexpr (is_initializer_tuple_ref_v<ReturnExprT>) {
-                emplace_apply(*retval_ptr, std::forward<ReturnExprT>(expr));
-            } else {
-                retval_ptr->emplace(std::forward<ReturnExprT>(expr));
-            }
-        }
-    }
+using async_fn_handle = std::coroutine_handle<async_fn_promise<T>>;
 
-    // TODO: exception handling
-    void unhandled_exception() {}
-};
+namespace _ {
 
-template<class T>
-inline async_fn<T>::async_fn(promise_type& callee_promise):
-callee(callee_type::from_promise(callee_promise)) {
-    callee_promise.retval_ptr = &retval;
-}
+template <typename T>
+using async_fn_base = common_manager<disable, disable, T, async_fn_promise<T>>;
 
-template<class T>
-inline async_fn<T>::~async_fn() {
-    // Take a look as comments in `generator<T>::~generator()`.
-    // `detail::transfer_to_handle` = `std::suspend_always` + ability to transfer ownership,
-    // so `async_fn` faces the same problem as `generator`.
-    if (callee) { callee.destroy(); }
-}
+} // namespace _
 
-template<class T>
-inline async_fn<T>::callee_type async_fn<T>::await_suspend(std::coroutine_handle<> ch) {
-    callee.promise().caller = ch; return callee;
-}
+/**
+ * @brief Wraps coroutine as a lazy async function.
+ * 
+ * `co_return coutils::co_result(...)` can be used as an equivalent of `return {...}`.
+ * 
+ * Note: When copy or move contructor is available, returned object will be at
+ *       least constructed once and moved once. Otherwise, the result of
+ *       `co_await` expression will be a wrapper of callee's handle, where a
+ *       reference of returned object can be obtained.
+ */
+template <typename T>
+class async_fn : private _::async_fn_base<T> {
+    using _Base = _::async_fn_base<T>;
+    using enum promise_state;
+    using _Base::handle;
+    using _Base::promise;
+    using _Base::move_out_returned;
 
+public:
+    using _Base::_Base;
 
-// no return value specialization
-template <>
-struct async_fn<void> {
-    struct promise_type;
-    using callee_type = std::coroutine_handle<promise_type>;
-    callee_type callee;
-    
     constexpr bool await_ready() const noexcept { return false; }
-    
-    async_fn(promise_type& callee_promise);
-    async_fn(const async_fn<void>&) = delete;
-    async_fn(async_fn<void>&& other) : callee(std::exchange(other.callee, {})) {}
-    ~async_fn();
-
-    operator callee_type() { return callee; }
-    operator std::coroutine_handle<void>() { return callee; }
-
-    callee_type await_suspend(std::coroutine_handle<> ch);
-    void await_resume() {}
-    void manual_resume() { callee.resume(); }
+    decltype(auto) await_suspend(std::coroutine_handle<> ch)
+        { promise().caller = ch; return handle(); }
+    decltype(auto) await_resume() { return move_out_returned(); }
 };
-
-struct async_fn<void>::promise_type {
-    std::coroutine_handle<> caller = std::noop_coroutine();
-    
-    auto get_return_object() { return async_fn(*this); }
-    auto initial_suspend() noexcept { return std::suspend_always{}; }
-    auto final_suspend() noexcept { return detail::transfer_to_handle{caller}; }
-    
-    void return_void() {}
-
-    // TODO: exception handling
-    void unhandled_exception() {}
-};
-
-inline async_fn<void>::async_fn(promise_type& callee_promise):
-callee(callee_type::from_promise(callee_promise)) {}
-
-inline async_fn<void>::~async_fn() { if (callee) { callee.destroy(); } }
-
-inline async_fn<void>::callee_type async_fn<void>::await_suspend(std::coroutine_handle<> ch) {
-    callee.promise().caller = ch; return callee;
-}
 
 } // namespace coutils
+
+template <typename T, typename... Args>
+struct std::coroutine_traits<coutils::async_fn<T>, Args...> {
+    using promise_type = coutils::promise_bridge<
+        coutils::async_fn<T>,
+        coutils::async_fn_promise<T>
+    >;
+};
 
 #endif // __COUTILS_ASYNC_FN__
