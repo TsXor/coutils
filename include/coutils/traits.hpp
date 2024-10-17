@@ -4,6 +4,7 @@
 
 #include <coroutine>
 #include <type_traits>
+#include "coutils/macros.hpp"
 
 namespace coutils::traits {
 
