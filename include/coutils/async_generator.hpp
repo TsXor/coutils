@@ -2,13 +2,13 @@
 #ifndef __COUTILS_ASYNC_GENERATOR__
 #define __COUTILS_ASYNC_GENERATOR__
 
-#include "coutils/common_promise.hpp"
+#include "coutils/zygote.hpp"
 
 namespace coutils {
 
 template <typename Y, typename S>
 struct async_generator_promise:
-    common_promise<Y, S, void>,
+    zygote_promise<Y, S, void>,
     mixins::promise_yield<async_generator_promise<Y, S>, Y>
 {
     std::coroutine_handle<> caller = {};
@@ -28,7 +28,7 @@ using async_generator_handle = std::coroutine_handle<async_generator_promise<Y, 
 namespace _ {
 
 template <typename Y, typename S>
-using async_generator_base = common_manager<Y, S, void, async_generator_promise<Y, S>>;
+using async_generator_base = zygote<Y, S, void, async_generator_promise<Y, S>>;
 
 } // namespace _
 

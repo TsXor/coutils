@@ -2,12 +2,12 @@
 #ifndef __COUTILS_ASYNC_FN__
 #define __COUTILS_ASYNC_FN__
 
-#include "coutils/common_promise.hpp"
+#include "coutils/zygote.hpp"
 
 namespace coutils {
 
 template <typename T>
-struct async_fn_promise: common_promise<disable, disable, T> {
+struct async_fn_promise: zygote_promise<disable, disable, T> {
     std::coroutine_handle<> caller = {};
     decltype(auto) final_suspend() noexcept
         { return transfer_to_handle{std::exchange(caller, {})}; }
@@ -19,7 +19,7 @@ using async_fn_handle = std::coroutine_handle<async_fn_promise<T>>;
 namespace _ {
 
 template <typename T>
-using async_fn_base = common_manager<disable, disable, T, async_fn_promise<T>>;
+using async_fn_base = zygote<disable, disable, T, async_fn_promise<T>>;
 
 } // namespace _
 

@@ -2,12 +2,12 @@
 #ifndef __COUTILS_GENERATOR__
 #define __COUTILS_GENERATOR__
 
-#include "coutils/common_promise.hpp"
+#include "coutils/zygote.hpp"
 
 namespace coutils {
 
 template <typename Y, typename S>
-struct generator_promise : common_promise<Y, S, void> {
+struct generator_promise : zygote_promise<Y, S, void> {
     void await_transform(auto&&) = delete;
 };
 
@@ -17,7 +17,7 @@ using generator_handle = std::coroutine_handle<generator_promise<Y, S>>;
 namespace _ {
 
 template <typename Y, typename S>
-using generator_base = common_manager<Y, S, void, generator_promise<Y, S>>;
+using generator_base = zygote<Y, S, void, generator_promise<Y, S>>;
 
 } // namespace _
 

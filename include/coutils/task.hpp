@@ -2,12 +2,12 @@
 #ifndef __COUTILS_TASK__
 #define __COUTILS_TASK__
 
-#include "coutils/common_promise.hpp"
+#include "coutils/zygote.hpp"
 
 namespace coutils {
 
 template <typename T>
-struct task_promise: common_promise<disable, disable, T> {};
+struct task_promise: zygote_promise<disable, disable, T> {};
 
 template <typename T>
 using task_handle = std::coroutine_handle<task_promise<T>>;
@@ -15,7 +15,7 @@ using task_handle = std::coroutine_handle<task_promise<T>>;
 namespace _ {
 
 template <typename T>
-using task_base = common_manager<disable, disable, T, task_promise<T>>;
+using task_base = zygote<disable, disable, T, task_promise<T>>;
 
 } // namespace _
 

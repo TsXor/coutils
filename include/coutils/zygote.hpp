@@ -1,6 +1,6 @@
 #pragma once
-#ifndef __COUTILS_COMMON_PROMISE__
-#define __COUTILS_COMMON_PROMISE__
+#ifndef __COUTILS_ZYGOTE__
+#define __COUTILS_ZYGOTE__
 
 #include <stdexcept>
 #include <variant>
@@ -93,9 +93,9 @@ struct promise_yield<D, disable> {};
  * features and properly handles exception.
  */
 template <typename Y, typename S, typename R>
-class common_promise:
-    public mixins::promise_yield<common_promise<Y, S, R>, Y>,
-    public mixins::promise_return<common_promise<Y, S, R>, R>
+class zygote_promise:
+    public mixins::promise_yield<zygote_promise<Y, S, R>, Y>,
+    public mixins::promise_return<zygote_promise<Y, S, R>, R>
 {
     template <typename D> friend class mixin;
     using enum promise_state;
@@ -220,17 +220,17 @@ public:
 
 
 template <typename Y, typename S, typename R>
-using common_handle = std::coroutine_handle<common_promise<Y, S, R>>;
+using zygote_handle = std::coroutine_handle<zygote_promise<Y, S, R>>;
 
 
 /**
- * @brief Wraps a handle of `common_promise`.
+ * @brief Wraps a handle of `zygote_promise`.
  * 
  * The third template parameter is for extending, replace it with subclass.
  */
 template <typename Y, typename S, typename R,
-    std::derived_from<common_promise<Y, S, R>> P = common_promise<Y, S, R>
-> class common_manager : public handle_manager<P> {
+    std::derived_from<zygote_promise<Y, S, R>> P = zygote_promise<Y, S, R>
+> class zygote : public handle_manager<P> {
     using enum promise_state;
 
 public:
@@ -294,4 +294,4 @@ public:
 
 } // namespace coutils
 
-#endif // __COUTILS_COMMON_PROMISE__
+#endif // __COUTILS_ZYGOTE__

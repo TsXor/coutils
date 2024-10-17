@@ -161,7 +161,7 @@ concept reconstructible =
 /**
  * @brief An empty class tag.
  * 
- * Currently, when used in `common_promise`, it represents `co_yield` (when used
+ * Currently, when used in `zygote_promise`, it represents `co_yield` (when used
  * as `Y`) or `co_return` (when used as `R`) is disabled.
  */
 struct disable {};
