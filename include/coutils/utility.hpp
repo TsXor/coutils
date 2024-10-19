@@ -2,7 +2,11 @@
 #ifndef __COUTILS_UTILITY__
 #define __COUTILS_UTILITY__
 
+#include <utility>
 #include <type_traits>
+#include <atomic>
+#include <memory>
+#include <variant>
 #include <stdexcept>
 #include <coroutine>
 #include "coutils/macros.hpp"
@@ -47,6 +51,34 @@ public:
 };
 
 
+/**
+ * @brief Wraps arbitrary class.
+ */
+template <typename T>
+class leaf {
+    [[no_unique_address]] T value;
+
+public:
+    explicit leaf()
+        requires std::default_initializable<T> {}
+
+    explicit leaf(auto&&... args)
+        requires std::constructible_from<T, decltype(args)...> :
+        value(COUTILS_FWD(args)...) {}
+
+    leaf(const leaf<T>& other)
+        requires std::copy_constructible<T> :
+        value(other.value) {}
+    leaf(leaf<T>&& other)
+        requires std::move_constructible<T> :
+        value(std::move(other.value)) {}
+
+    T& get() & { return value; }
+    const T& get() const & { return value; }
+    T&& get() && { return std::move(value); }
+};
+
+
 template <typename T>
 concept non_value = std::is_void_v<T> || std::is_reference_v<T>;
 
@@ -56,38 +88,17 @@ template <typename T, bool = std::is_void_v<T>, bool = std::is_reference_v<T>>
 struct non_value_wrapper_impl {};
 
 template <typename T>
-class non_value_wrapper_impl<T, false, false> {
-    using Self = non_value_wrapper_impl<T, false, false>;
-
-    T value;
-
-public:
+struct non_value_wrapper_impl<T, false, false> : leaf<T> {
     using type = T;
-
-    explicit non_value_wrapper_impl()
-        requires std::default_initializable<T> {}
-
-    explicit non_value_wrapper_impl(auto&&... args)
-        requires std::constructible_from<T, decltype(args)...> :
-        value(COUTILS_FWD(args)...) {}
-
-    non_value_wrapper_impl(const Self& other)
-        requires std::copy_constructible<T> :
-        value(other.value) {}
-    non_value_wrapper_impl(Self&& other)
-        requires std::move_constructible<T> :
-        value(std::move(other.value)) {}
-
-    T& get() & { return value; }
-    T& get() const & { return value; }
-    T&& get() && { return std::move(value); }
+    using leaf<T>::leaf;
 };
 
 template <typename T>
 struct non_value_wrapper_impl<T, true, false> {
     using type = T;
     explicit non_value_wrapper_impl() = default;
-    void get() { return; }
+    explicit non_value_wrapper_impl(std::monostate) {}
+    std::monostate get() { return {}; }
 };
 
 template <typename T>
@@ -104,12 +115,59 @@ struct non_value_wrapper_impl<T, false, true> : ref<T> {
  * This is useful when storing arbitrary types into `std::optional` or
  * `std::variant`.
  * 
+ * Contained value can be unwrapped using `.get()`. For convenience, result of
+ * unwrapping `non_value_wrapper<void>` is `std::monostate`. (This is because
+ * there are many restrictions on using void expression and most times it
+ * requires to repeatedly check whether resulting type is void.)
+ * 
  * Note that C-style arrays are not replaced, while `std::optional` or
  * `std::variant` cannot store them.
  */
 template <typename T>
 struct non_value_wrapper : _::non_value_wrapper_impl<T> {
     using _::non_value_wrapper_impl<T>::non_value_wrapper_impl;
+};
+
+template <typename T>
+constexpr bool is_monostate_v =
+    std::is_same_v<std::remove_cvref_t<T>, std::monostate>;
+
+
+/**
+ * @brief Lightweight lock implemented with `std::atomic_flag`.
+ */
+class light_lock {
+    using enum std::memory_order;
+
+    std::atomic_flag _flag = ATOMIC_FLAG_INIT;
+
+public:
+    explicit light_lock() {};
+
+    void lock() noexcept {
+        while (_flag.test_and_set(acquire)) {
+            _flag.wait(true, relaxed);
+        }
+    }
+
+    void unlock() noexcept {
+        _flag.clear(release);
+        _flag.notify_one();
+    }
+
+    bool try_lock() noexcept {
+        return !_flag.test_and_set(acquire);
+    }
+};
+
+class empty_lock {
+public:
+    explicit empty_lock() = default;
+    empty_lock(const empty_lock&) = default;
+    constexpr void lock() noexcept {}
+    constexpr void unlock() noexcept {}
+    constexpr bool try_lock() noexcept { return true; }
+    auto ref() noexcept { return empty_lock(); }
 };
 
 
@@ -128,15 +186,15 @@ struct non_value_wrapper : _::non_value_wrapper_impl<T> {
  */
 template <traits::awaiter T> requires std::is_reference_v<T>
 class ref_awaiter {
-    T _ref;
+    ref<T> _ref;
 public:
-    explicit ref_awaiter(T ref) : _ref(static_cast<T>(ref)) {}
+    explicit ref_awaiter(T ref) : _ref(COUTILS_FWD(ref)) {}
     constexpr bool await_ready()
-        { return static_cast<T>(_ref).await_ready(); }
+        { return _ref.get().await_ready(); }
     constexpr decltype(auto) await_suspend(std::coroutine_handle<> ch)
-        { return static_cast<T>(_ref).await_suspend(ch); }
+        { return _ref.get().await_suspend(ch); }
     constexpr decltype(auto) await_resume()
-        { return static_cast<T>(_ref).await_resume(); }
+        { return _ref.get().await_resume(); }
 };
 
 template <traits::awaiter T> requires std::is_reference_v<T&&>
@@ -172,12 +230,12 @@ struct disable {};
  */
 template <typename T> requires std::is_reference_v<T>
 struct immediately {
-    T _ref;
+    ref<T> _ref;
 public:
-    explicit immediately(T ref) : _ref(static_cast<T>(ref)) {}
+    explicit immediately(T ref) : _ref(COUTILS_FWD(ref)) {}
     constexpr bool await_ready() const noexcept { return true; }
     constexpr void await_suspend(std::coroutine_handle<> ch) const noexcept {}
-    constexpr decltype(auto) await_resume() { return static_cast<T>(_ref); }
+    constexpr decltype(auto) await_resume() { return _ref.get(); }
 };
 
 template <typename T> requires std::is_reference_v<T&&>
@@ -272,16 +330,21 @@ class handle_manager {
 public:
     using handle_type = _Handle;
 
+    explicit handle_manager() : _handle({}) {}
     explicit handle_manager(_Handle handle): _handle(handle) {}
     explicit handle_manager(P& promise):
         _handle(_Handle::from_promise(promise)) {}
     ~handle_manager() { destroy(); }
 
     handle_manager(const handle_manager<P>&) = delete;
+    handle_manager<P>& operator=(const handle_manager<P>&) = delete;
     handle_manager(handle_manager<P>&& other) noexcept :
         _handle(std::exchange(other._handle, {})) {}
+    handle_manager<P>& operator=(handle_manager<P>&& other) noexcept
+        { destroy(); _handle = std::exchange(other._handle, {}); }
 
     P& promise() { return _handle.promise(); }
+    bool empty() { return !_handle; }
     _Handle handle() noexcept { return _handle; }
     _Handle transfer() noexcept { return std::exchange(_handle, {}); }
     void destroy() { if (_handle) { transfer().destroy(); } }
@@ -290,23 +353,62 @@ public:
 };
 
 /**
- * @brief A simple promise type that returns `void` and catches exception.
+ * @brief A simple promise type that returns `void` and ignores exception.
  */
 struct simple_promise {
-    std::exception_ptr error = nullptr;
-
     void return_void() noexcept {}
-    void unhandled_exception() noexcept
-        { error = std::current_exception(); }
+    void unhandled_exception() noexcept {}
 
     decltype(auto) initial_suspend() noexcept
         { return std::suspend_always{}; }
     decltype(auto) final_suspend() noexcept
         { return std::suspend_always{}; }
-
-    void check_error()
-        { if (error) { std::rethrow_exception(error); } }
 };
+
+
+template <std::size_t I>
+using index_constant = std::integral_constant<std::size_t, I>;
+
+namespace _ {
+
+template <std::size_t I, typename VisRef>
+static void visitor_invoker(VisRef vis) { vis(index_constant<I>{}); }
+
+template <std::size_t, typename, typename>
+struct jump_table_impl;
+
+template <std::size_t Max, std::size_t... Is, typename VisRef>
+struct jump_table_impl<Max, std::index_sequence<Is...>, VisRef> {
+    using func = void(VisRef);
+    static constexpr std::array<func*, Max> table{visitor_invoker<Is, VisRef>...};
+};
+
+template <std::size_t Max, typename VisRef>
+struct jump_table : jump_table_impl<Max, std::make_index_sequence<Max>, VisRef> {};
+
+} // namespace _
+
+/**
+ * @brief "Constantify" a dynamic index in given range.
+ * 
+ * This is similar to a switch-case.
+ */
+template <std::size_t max, typename Visitor>
+void visit_index(std::size_t idx, Visitor&& vis) {
+    _::jump_table<max, Visitor&&>::table[idx](COUTILS_FWD(vis));
+}
+
+#define COUTILS_VISITOR(var) \
+    [&] <std::size_t var> (coutils::index_constant<var>) -> void
+
+/**
+ * @brief Shortcut for using `visit_index` on `std::variant`.
+ */
+template <typename Variant, typename Visitor>
+void visit_variant(Variant&& var, Visitor&& vis) {
+    constexpr auto vsize = std::variant_size_v<std::remove_cvref_t<Variant>>;
+    visit_index<vsize>(var.index(), COUTILS_FWD(vis));
+}
 
 } // namespace coutils
 

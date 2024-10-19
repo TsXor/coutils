@@ -7,7 +7,10 @@
 
 namespace coutils {
 
-struct agent_promise : simple_promise {};
+struct agent_promise : simple_promise {
+    decltype(auto) final_suspend() noexcept
+        { return std::suspend_never{}; }
+};
 
 using agent_handle = std::coroutine_handle<agent_promise>;
 
@@ -21,10 +24,19 @@ using agent_base = handle_manager<agent_promise>;
  * @brief A reduced type of coroutine.
  * 
  * This can be used to generate coroutines for explicitly manipulating other
- * coroutines. For its usage see `wait` and `all_completed`.
+ * coroutines. For its usage see `wait`.
+ * 
+ * Coroutines of this type does not handle exceptions, so they are expected to
+ * be `noexcept`. 
+ * 
+ * Coroutines of this type does not suspend at final suspend point, so they
+ * will be automatically destroyed after they finish.
  */
 struct agent : _::agent_base {
     using _::agent_base::agent_base;
+    ~agent() { transfer(); }
+    agent& operator=(const agent&) = delete;
+    agent& operator=(agent&&) = default;
 };
 
 } // namespace coutils
