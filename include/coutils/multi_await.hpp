@@ -17,33 +17,26 @@ namespace _ {
 template <traits::awaitable... Ts>
 struct await_storage {
 private:
-    template <typename T>
-    using _Awaitable = non_value_wrapper<T>;
-    template <typename T>
-    using _Awaiter = non_value_wrapper<traits::awaiter_cvt_t<T>>;
-    template <typename T>
-    using _Result = non_value_wrapper<traits::co_await_t<T>>;
-
     template <std::size_t... Is>
     await_storage(std::index_sequence<Is...>, auto&&... args):
         awaitables(COUTILS_FWD(args)...),
-        awaiters(ops::get_awaiter(static_cast<Ts&&>(get_unwrap<Is>(awaitables)))...) {}
+        awaiters(ops::get_awaiter(static_cast<Ts&&>(std::get<Is>(awaitables)))...) {}
 
 public:
-    std::tuple<_Awaitable<Ts>...> awaitables;
-    std::tuple<_Awaiter<Ts>...> awaiters;
+    wrap_tuple<Ts...> awaitables;
+    wrap_tuple<traits::awaiter_cvt_t<Ts>...> awaiters;
 
     await_storage(auto&&... args) requires (sizeof...(args) == sizeof...(Ts)) :
         await_storage(std::index_sequence_for<Ts...>{}, COUTILS_FWD(args)...) {}
 
-    using any_result = std::variant<_Result<Ts>...>;
-    using all_result = std::tuple<_Result<Ts>...>;
+    using any_result = wrap_variant<traits::co_await_t<Ts>...>;
+    using all_result = wrap_tuple<traits::co_await_t<Ts>...>;
 
     void launch(auto&& gen_handle) {
         [&] <std::size_t... Is> (std::index_sequence<Is...>) {
             using _Handles = std::array<std::coroutine_handle<>, sizeof...(Ts)>;
             auto handles = _Handles{gen_handle(Is)...};
-            (..., ops::await_launch(get_unwrap<Is>(awaiters), handles[Is]));
+            (..., ops::await_launch(std::get<Is>(awaiters), handles[Is]));
         } (std::index_sequence_for<Ts...>{});
     }
 
@@ -51,7 +44,7 @@ public:
         return visit_index<sizeof...(Ts)>(idx,
             COUTILS_VISITOR(I) {
                 return any_result(std::in_place_index<I>,
-                    ops::await_resume(get_unwrap<I>(awaiters))
+                    ops::await_resume(std::get<I>(awaiters))
                 );
             }
         );
@@ -60,7 +53,7 @@ public:
     all_result get_all() {
         return [&] <std::size_t... Is> (std::index_sequence<Is...>) {
             return all_result(
-                ops::await_resume(get_unwrap<Is>(awaiters))...
+                ops::await_resume(std::get<Is>(awaiters))...
             );
         } (std::index_sequence_for<Ts...>{});
     }

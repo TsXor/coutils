@@ -79,6 +79,37 @@ public:
 };
 
 
+/**
+ * @brief Get I-th type in a type pack.
+ */
+template <std::size_t I, typename... Ts>
+struct typack_index;
+
+template <std::size_t I>
+struct typack_index<I> {};
+
+template <typename T, typename... Left>
+struct typack_index<0, T, Left...> { using type = T; };
+
+template <std::size_t I, typename T, typename... Left>
+struct typack_index<I, T, Left...> : typack_index<I - 1, Left...> {};
+
+template <std::size_t I, typename... Ts>
+using typack_index_t = typename typack_index<I, Ts...>::type;
+
+
+/**
+ * @brief Cast reference to given type, automatically keeping lvalue/rvalue
+ *        reference type.
+ */
+template <typename T> requires (!std::is_reference_v<T>)
+decltype(auto) cast_ref(auto&& ref) {
+    if constexpr (std::is_lvalue_reference_v<decltype(ref)>)
+        { return static_cast<T&>(ref); }
+    else { return static_cast<T&&>(ref); }
+}
+
+
 template <typename T>
 concept non_value = std::is_void_v<T> || std::is_reference_v<T>;
 
@@ -90,12 +121,14 @@ struct non_value_wrapper_impl {};
 template <typename T>
 struct non_value_wrapper_impl<T, false, false> : leaf<T> {
     using type = T;
+    using unwrap_type = T;
     using leaf<T>::leaf;
 };
 
 template <typename T>
 struct non_value_wrapper_impl<T, true, false> {
     using type = T;
+    using unwrap_type = std::monostate;
     explicit non_value_wrapper_impl() = default;
     explicit non_value_wrapper_impl(std::monostate) {}
     std::monostate get() { return {}; }
@@ -104,6 +137,7 @@ struct non_value_wrapper_impl<T, true, false> {
 template <typename T>
 struct non_value_wrapper_impl<T, false, true> : ref<T> {
     using type = T;
+    using unwrap_type = T;
     using ref<T>::ref;
 };
 
@@ -138,16 +172,100 @@ struct is_non_value_wrapper<non_value_wrapper<T>> : public std::true_type {};
 template <typename T>
 inline constexpr bool is_non_value_wrapper_v = is_non_value_wrapper<T>::value;
 
-/**
- * @brief Call `std::get` and unwraps result when needed.
- */
-template <std::size_t I>
-decltype(auto) get_unwrap(auto&& obj) {
-    using _Got = decltype(std::get<I>(COUTILS_FWD(obj)));
-    if constexpr (is_non_value_wrapper_v<std::remove_cvref_t<_Got>>)
-        { return std::get<I>(COUTILS_FWD(obj)).get(); }
-    else { return std::get<I>(COUTILS_FWD(obj)); }
+
+namespace _ {
+
+template <std::size_t I, typename T>
+decltype(auto) super_get(T&& obj) {
+    using _Super = typename std::remove_cvref_t<T>::super_type;
+    return std::get<I>(cast_ref<_Super>(COUTILS_FWD(obj))).get();
 }
+
+} // namespace _
+
+
+template <typename... Ts>
+struct wrap_tuple : public std::tuple<non_value_wrapper<Ts>...> {
+    using super_type = std::tuple<non_value_wrapper<Ts>...>;
+    using super_type::super_type;
+};
+
+/**
+ * @brief Checks if a type is instantiation of `wrap_tuple`.
+ */
+template <typename T>
+struct is_wrap_tuple : public std::false_type {};
+template <typename... Ts>
+struct is_wrap_tuple<wrap_tuple<Ts...>> : public std::true_type {};
+template <typename T>
+inline constexpr bool is_wrap_tuple_v = is_wrap_tuple<T>::value;
+
+} // namespace coutils
+
+template<typename... Ts>
+struct std::tuple_size<coutils::wrap_tuple<Ts...>>:
+    std::integral_constant<std::size_t, sizeof...(Ts)> {};
+
+template<std::size_t I, typename... Ts>
+struct std::tuple_element<I, coutils::wrap_tuple<Ts...>> {
+    using type = typename coutils::non_value_wrapper<
+        coutils::typack_index_t<I, Ts...>
+    >::unwrap_type;
+};
+
+template<size_t I, typename... Ts>
+constexpr decltype(auto) std::get(coutils::wrap_tuple<Ts...>& t) noexcept
+    { return coutils::_::super_get<I>(COUTILS_FWD(t)); }
+template<size_t I, typename... Ts>
+constexpr decltype(auto) std::get(const coutils::wrap_tuple<Ts...>& t) noexcept
+    { return coutils::_::super_get<I>(COUTILS_FWD(t)); }
+template<size_t I, typename... Ts>
+constexpr decltype(auto) std::get(coutils::wrap_tuple<Ts...>&& t) noexcept
+    { return coutils::_::super_get<I>(COUTILS_FWD(t)); }
+
+namespace coutils {
+
+
+template <typename... Ts>
+struct wrap_variant : public std::variant<non_value_wrapper<Ts>...> {
+    using super_type = std::variant<non_value_wrapper<Ts>...>;
+    using super_type::super_type;
+};
+
+/**
+ * @brief Checks if a type is instantiation of `wrap_variant`.
+ */
+template <typename T>
+struct is_wrap_variant : public std::false_type {};
+template <typename... Ts>
+struct is_wrap_variant<wrap_variant<Ts...>> : public std::true_type {};
+template <typename T>
+inline constexpr bool is_wrap_variant_v = is_wrap_variant<T>::value;
+
+} // namespace coutils
+
+template<typename... Ts>
+struct std::variant_size<coutils::wrap_variant<Ts...>>:
+    std::integral_constant<std::size_t, sizeof...(Ts)> {};
+
+template<std::size_t I, typename... Ts>
+struct std::variant_alternative<I, coutils::wrap_variant<Ts...>> {
+    using type = typename coutils::non_value_wrapper<
+        coutils::typack_index_t<I, Ts...>
+    >::unwrap_type;
+};
+
+template<size_t I, typename... Ts>
+constexpr decltype(auto) std::get(coutils::wrap_variant<Ts...>& v) noexcept
+    { return coutils::_::super_get<I>(COUTILS_FWD(v)); }
+template<size_t I, typename... Ts>
+constexpr decltype(auto) std::get(const coutils::wrap_variant<Ts...>& v) noexcept
+    { return coutils::_::super_get<I>(COUTILS_FWD(v)); }
+template<size_t I, typename... Ts>
+constexpr decltype(auto) std::get(coutils::wrap_variant<Ts...>&& v) noexcept
+    { return coutils::_::super_get<I>(COUTILS_FWD(v)); }
+
+namespace coutils {
 
 
 /**
