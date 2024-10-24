@@ -19,12 +19,10 @@ coutils::async_fn<void> test() {
     std::cout << "(" << a << ", " << b << ")" << std::endl;
 
     std::cout << "coutils::as_completed:" << std::endl;
-    COUTILS_FOR(auto& var, coutils::as_completed(task_a(), task_b()))
+    COUTILS_FOR(auto&& var, coutils::as_completed(task_a(), task_b()))
         coutils::visit_variant(var, COUTILS_VISITOR(I) {
-            auto&& val = std::get<I>(var);
-            if constexpr (!coutils::is_monostate_v<decltype(val)>) {
-                std::cout << "[" << I << "]: " << val << std::endl;
-            }
+            auto&& val = coutils::get_unwrap<I>(var);
+            std::cout << "[" << I << "]: " << val << std::endl;
         });
     COUTILS_ENDFOR()
 }

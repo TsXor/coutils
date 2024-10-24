@@ -128,9 +128,26 @@ struct non_value_wrapper : _::non_value_wrapper_impl<T> {
     using _::non_value_wrapper_impl<T>::non_value_wrapper_impl;
 };
 
+/**
+ * @brief Checks if a type is instantiation of `non_value_wrapper`.
+ */
 template <typename T>
-constexpr bool is_monostate_v =
-    std::is_same_v<std::remove_cvref_t<T>, std::monostate>;
+struct is_non_value_wrapper : public std::false_type {};
+template <typename T>
+struct is_non_value_wrapper<non_value_wrapper<T>> : public std::true_type {};
+template <typename T>
+inline constexpr bool is_non_value_wrapper_v = is_non_value_wrapper<T>::value;
+
+/**
+ * @brief Call `std::get` and unwraps result when needed.
+ */
+template <std::size_t I>
+decltype(auto) get_unwrap(auto&& obj) {
+    using _Got = decltype(std::get<I>(COUTILS_FWD(obj)));
+    if constexpr (is_non_value_wrapper_v<std::remove_cvref_t<_Got>>)
+        { return std::get<I>(COUTILS_FWD(obj)).get(); }
+    else { return std::get<I>(COUTILS_FWD(obj)); }
+}
 
 
 /**
@@ -371,16 +388,16 @@ using index_constant = std::integral_constant<std::size_t, I>;
 
 namespace _ {
 
-template <std::size_t I, typename VisRef>
-static void visitor_invoker(VisRef vis) { vis(index_constant<I>{}); }
-
 template <std::size_t, typename, typename>
 struct jump_table_impl;
 
 template <std::size_t Max, std::size_t... Is, typename VisRef>
 struct jump_table_impl<Max, std::index_sequence<Is...>, VisRef> {
-    using func = void(VisRef);
-    static constexpr std::array<func*, Max> table{visitor_invoker<Is, VisRef>...};
+    template <std::size_t I>
+    static decltype(auto) visitor_invoker(VisRef vis)
+        { return vis(index_constant<I>{}); }
+
+    static constexpr auto table = std::array{visitor_invoker<Is>...};
 };
 
 template <std::size_t Max, typename VisRef>
@@ -394,20 +411,20 @@ struct jump_table : jump_table_impl<Max, std::make_index_sequence<Max>, VisRef> 
  * This is similar to a switch-case.
  */
 template <std::size_t max, typename Visitor>
-void visit_index(std::size_t idx, Visitor&& vis) {
-    _::jump_table<max, Visitor&&>::table[idx](COUTILS_FWD(vis));
+decltype(auto) visit_index(std::size_t idx, Visitor&& vis) {
+    return _::jump_table<max, Visitor&&>::table[idx](COUTILS_FWD(vis));
 }
 
 #define COUTILS_VISITOR(var) \
-    [&] <std::size_t var> (coutils::index_constant<var>) -> void
+    [&] <std::size_t var> (coutils::index_constant<var>)
 
 /**
  * @brief Shortcut for using `visit_index` on `std::variant`.
  */
 template <typename Variant, typename Visitor>
-void visit_variant(Variant&& var, Visitor&& vis) {
+decltype(auto) visit_variant(Variant&& var, Visitor&& vis) {
     constexpr auto vsize = std::variant_size_v<std::remove_cvref_t<Variant>>;
-    visit_index<vsize>(var.index(), COUTILS_FWD(vis));
+    return visit_index<vsize>(var.index(), COUTILS_FWD(vis));
 }
 
 } // namespace coutils

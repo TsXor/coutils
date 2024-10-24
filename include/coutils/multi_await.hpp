@@ -5,6 +5,7 @@
 #include <array>
 #include <mutex>
 #include <memory>
+#include <span>
 #include "coutils/utility.hpp"
 #include "coutils/traits.hpp"
 #include "coutils/agent.hpp"
@@ -13,52 +14,44 @@ namespace coutils {
 
 namespace _ {
 
-struct shim_controller_base {
-    static constexpr auto npos = std::size_t(-1);
-    light_lock lock;
-    std::coroutine_handle<> caller = {};
-
-    constexpr bool await_ready() const noexcept
-        { return caller.address() == nullptr; }
-    constexpr decltype(auto) await_suspend(std::coroutine_handle<> ch)
-        noexcept { return std::exchange(caller, ch); }
-    constexpr void await_resume() const noexcept {}
-};
-
 template <traits::awaitable... Ts>
 struct await_storage {
 private:
     template <typename T>
-    using _Rval = non_value_wrapper<traits::co_await_t<T>>;
+    using _Awaitable = non_value_wrapper<T>;
+    template <typename T>
+    using _Awaiter = non_value_wrapper<traits::awaiter_cvt_t<T>>;
+    template <typename T>
+    using _Result = non_value_wrapper<traits::co_await_t<T>>;
 
     template <std::size_t... Is>
     await_storage(std::index_sequence<Is...>, auto&&... args):
         awaitables(COUTILS_FWD(args)...),
-        awaiters(ops::get_awaiter(static_cast<Ts&&>(std::get<Is>(awaitables)))...) {}
+        awaiters(ops::get_awaiter(static_cast<Ts&&>(get_unwrap<Is>(awaitables)))...) {}
 
 public:
-    std::tuple<Ts...> awaitables;
-    std::tuple<traits::awaiter_cvt_t<Ts>...> awaiters;
+    std::tuple<_Awaitable<Ts>...> awaitables;
+    std::tuple<_Awaiter<Ts>...> awaiters;
 
     await_storage(auto&&... args) requires (sizeof...(args) == sizeof...(Ts)) :
         await_storage(std::index_sequence_for<Ts...>{}, COUTILS_FWD(args)...) {}
 
-    using any_result = std::variant<_Rval<Ts>..., std::monostate>;
-    using all_result = std::tuple<_Rval<Ts>...>;
+    using any_result = std::variant<_Result<Ts>...>;
+    using all_result = std::tuple<_Result<Ts>...>;
 
     void launch(auto&& gen_handle) {
         [&] <std::size_t... Is> (std::index_sequence<Is...>) {
             using _Handles = std::array<std::coroutine_handle<>, sizeof...(Ts)>;
             auto handles = _Handles{gen_handle(Is)...};
-            (..., ops::await_launch(std::get<Is>(awaiters), handles[Is]));
+            (..., ops::await_launch(get_unwrap<Is>(awaiters), handles[Is]));
         } (std::index_sequence_for<Ts...>{});
     }
 
-    void get_any(std::size_t idx, any_result& result) {
-        visit_index<sizeof...(Ts)>(idx,
-            [&] <std::size_t I> (index_constant<I>) {
-                result.template emplace<I>(
-                    ops::await_resume(std::get<I>(awaiters))
+    any_result get_any(std::size_t idx) {
+        return visit_index<sizeof...(Ts)>(idx,
+            COUTILS_VISITOR(I) {
+                return any_result(std::in_place_index<I>,
+                    ops::await_resume(get_unwrap<I>(awaiters))
                 );
             }
         );
@@ -67,7 +60,7 @@ public:
     all_result get_all() {
         return [&] <std::size_t... Is> (std::index_sequence<Is...>) {
             return all_result(
-                ops::await_resume(std::get<Is>(awaiters))...
+                ops::await_resume(get_unwrap<Is>(awaiters))...
             );
         } (std::index_sequence_for<Ts...>{});
     }
@@ -80,21 +73,28 @@ public:
 namespace _ {
 
 struct as_completed_shim {
-    struct controller : shim_controller_base {
-        std::size_t id = npos;
+    using enum std::memory_order;
+
+    struct controller {
+        std::coroutine_handle<> caller;
+        light_lock lock;
+        std::atomic<std::size_t> finished = 0, consumed = 0;
+        std::size_t* order;
     };
 
     static agent shim(std::size_t id, std::shared_ptr<controller> control) noexcept {
-        auto guard = std::lock_guard(control->lock);
-        control->id = id;
-        co_await *control;
-        // When parent is alive and we are the last one,
-        // transfer control to parent again.
-        if (control.use_count() == 2 && control->caller) {
-            auto& dropped_control = *control.get();
-            control.reset();
-            co_await dropped_control;
+        bool caller_blocked;
+        {
+            auto guard = std::lock_guard(control->lock);
+            // here is actually a push operation of a SPSC queue
+            auto finished = control->finished.load(relaxed);
+            auto consumed = control->consumed.load(acquire);
+            caller_blocked = consumed == finished && control->caller;
+            control->order[finished] = id; ++finished;
+            control->finished.store(finished, release);
         }
+        if (caller_blocked) { control->caller.resume(); }
+        co_return;
     }
 };
 
@@ -116,9 +116,8 @@ struct as_completed_shim {
  * 
  * First, the awaitables will be started serially on the same thread as caller,
  * then, as the iterator increments, the caller may be resumed on different
- * threads, but it is guarded with a lock so that only one thread can resume
- * and execute the caller at the same time. When iteration ends, the caller is
- * resumed by the last fulfilled awaitable.
+ * threads. After iteration ends, the caller may be resumed any one of given
+ * awaitables.
  * 
  * If awaitables are not all consumed when this is destructed, the ones left
  * will have their result dropped.
@@ -128,6 +127,7 @@ struct as_completed_shim {
  */
 template <traits::awaitable... Ts>
 class as_completed : private _::as_completed_shim {
+    using enum std::memory_order;
     using _::as_completed_shim::shim;
     using _::as_completed_shim::controller;
 
@@ -135,45 +135,55 @@ class as_completed : private _::as_completed_shim {
     using _Storage = _::await_storage<Ts...>;
 
     _Storage storage;
+    std::array<std::size_t, sizeof...(Ts)> order;
     std::shared_ptr<controller> control;
-    _Storage::any_result result;
 
-    bool finished() const { return control.use_count() == 1; }
+    std::size_t consumed() const { return control->consumed.load(relaxed); }
+    std::size_t finished() const { return control->finished.load(relaxed); }
 
-    void on_suspend(std::coroutine_handle<> ch) {
+    auto finish_order() const
+        { return std::span<const std::size_t>(order.data(), finished()); }
+
+    bool all_consumed() const { return consumed() == size; }
+
+    bool on_suspend(std::coroutine_handle<> ch) {
+        bool should_suspend;
         if (control.use_count() == 0) {
             control = std::make_shared<controller>();
+            control->order = order.data();
             control->caller = ch;
-            control->id = sizeof...(Ts);
             storage.launch([&](size_t idx) {
                 return shim(idx, control).transfer();
             });
+            should_suspend = true;
         } else {
-            std::exchange(control->caller, ch).resume();
+            // here is actually a pop operation of a SPSC queue
+            auto consumed = control->consumed.load(relaxed);
+            auto finished = control->finished.load(acquire);
+            control->caller = ch; ++consumed;
+            should_suspend = consumed == finished && consumed < size;
+            control->consumed.store(consumed, release);
         }
+        return should_suspend;
     }
 
-    void on_resume() {
-        if (control.use_count() == 1) {
-            // Finalize the last shim.
-            std::exchange(control->caller, {}).resume();
-            result.template emplace<sizeof...(Ts)>();
-        } else {
-            storage.get_any(control->id, result);
-        }
+    decltype(auto) get_result() {
+        auto consumed = control->consumed.load(relaxed);
+        return storage.get_any(consumed);
     }
 
     void drop_left() {
-        if (control->caller) {
-            std::exchange(control->caller, {}).resume();
-        }
+        auto consumed = control->consumed.load(relaxed);
+        auto finished = control->finished.load(acquire);
+        control->caller = {}; ++consumed;
+        control->consumed.store(consumed, release);
     }
 
 public:
-    as_completed(auto&&... args) : storage(COUTILS_FWD(args)...),
-        result(std::in_place_index<sizeof...(Ts)>) {}
-
+    as_completed(auto&&... args) : storage(COUTILS_FWD(args)...) {}
     ~as_completed() { drop_left(); }
+
+    constexpr static std::size_t size = sizeof...(Ts);
 
     friend class iterator;
     class iterator {
@@ -187,17 +197,20 @@ public:
         iterator(iterator&& other):
             ptr(std::exchange(other.ptr, nullptr)) {}
 
-        bool operator==(std::default_sentinel_t) { return ptr->finished(); }
-        decltype(auto) operator*() { return (ptr->result); }
-        decltype(auto) operator->() { return std::addressof(*(*this)); }
+        std::size_t n_consumed() const { return ptr->consumed(); }
+        std::size_t n_finished() const { return ptr->finished(); }
+        decltype(auto) finish_order() const { return ptr->finish_order(); }
+
+        bool operator==(std::default_sentinel_t) { return ptr->all_consumed(); }
+        decltype(auto) operator*() { return ptr->get_result(); }
         iterator& operator++() & { return *this; }
         iterator operator++() && { return std::move(*this); }
 
         constexpr bool await_ready() const noexcept { return false; }
         decltype(auto) await_suspend(std::coroutine_handle<> ch)
             { return ptr->on_suspend(ch); }
-        iterator& await_resume() & { ptr->on_resume(); return *this; }
-        iterator await_resume() && { ptr->on_resume(); return std::move(*this); }
+        iterator& await_resume() & { return *this; }
+        iterator await_resume() && { return std::move(*this); }
 
         COUTILS_REF_AWAITER_CONV_OVERLOAD
     };
@@ -216,15 +229,15 @@ as_completed(Ts&&...) -> as_completed<Ts...>;
 namespace _ {
 
 struct all_completed_shim {
-    struct controller : shim_controller_base {
-        std::size_t count = npos;
+    struct controller {
+        std::coroutine_handle<> caller;
+        std::atomic<std::size_t> count;
     };
 
     static agent shim(size_t id, controller& control) noexcept {
-        auto guard = std::lock_guard(control.lock);
-        --(control.count);
-        // When we are the last one, transfer control to parent.
-        if (control.count == 0) { co_await control; }
+        // When we are the last one, resume parent.
+        if (--control.count == 0) { control.caller.resume(); }
+        co_return;
     }
 };
 
@@ -246,9 +259,10 @@ struct all_completed_shim {
  * 
  * First, the awaitables will be started serially on the same thread as caller,
  * then, the caller will be resumed when all awaitables are fulfilled. The
- * caller is resumed by the last fulfilled awaitable.
+ * caller may be resumed by any one of given awaitables.
  * 
- * This class will cause N heap allocations (for N shim coroutines) when awaited.
+ * This class will cause N + 1 heap allocations (N for N shim coroutines and 1
+ * for a control block) when awaited.
  */
 template <traits::awaitable... Ts>
 class all_completed : private _::all_completed_shim {
@@ -258,24 +272,26 @@ class all_completed : private _::all_completed_shim {
     using _Storage = _::await_storage<Ts...>;
 
     _Storage storage;
-    controller control;
+    std::unique_ptr<controller> control;
 
 public:
     template <std::size_t... Is>
     all_completed(auto&&... args) : storage(COUTILS_FWD(args)...) {}
 
+    constexpr static std::size_t size = sizeof...(Ts);
+
     constexpr bool await_ready() const noexcept { return false; }
 
     decltype(auto) await_suspend(std::coroutine_handle<> ch) {
-        control.caller = ch;
-        control.count = sizeof...(Ts);
+        control = std::make_unique<controller>();
+        control->caller = ch;
+        control->count = size;
         storage.launch([&](size_t idx) {
-            return shim(idx, control).transfer();
+            return shim(idx, *control).transfer();
         });
     }
 
     _Storage::all_result await_resume() {
-        std::exchange(control.caller, {}).resume();
         return storage.get_all();
     }
 };
