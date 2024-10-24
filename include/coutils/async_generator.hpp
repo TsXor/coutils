@@ -58,7 +58,7 @@ public:
 
         using _Base::send;
         bool operator==(std::default_sentinel_t) { return status() == RETURNED; }
-        decltype(auto) operator*() { return std::move(yielded()).get(); }
+        decltype(auto) operator*() { return yielded(); }
         decltype(auto) operator->() { return std::addressof(*(*this)); }
         iterator& operator++() & { return *this; }
         iterator operator++() && { return {transfer()}; }

@@ -143,13 +143,7 @@ public:
     using send_type = S;
     using return_type = R;
 
-    std::variant<
-        std::monostate,
-        non_value_wrapper<Y>,
-        non_value_wrapper<S>,
-        non_value_wrapper<R>,
-        std::exception_ptr
-    > data;
+    wrap_variant<void, Y, S, R, std::exception_ptr> data;
 
     decltype(auto) status() const noexcept
         { return static_cast<promise_state>(data.index()); }
@@ -212,7 +206,7 @@ public:
     decltype(auto) yield_resume() {
         set_default_received();
         check_value<RECEIVED>();
-        return std::move(get_received()).get();
+        return get_received();
     }
 };
 
@@ -268,7 +262,7 @@ public:
         using handle_manager<P>::promise;
     public:
         using handle_manager<P>::handle_manager;
-        R& get() { return promise().get_returned().get(); }
+        R& get() { return promise().get_returned(); }
         R& operator*() { return get(); }
         R* operator->() { return std::addressof(get()); }
     };
@@ -276,13 +270,11 @@ public:
     decltype(auto) move_out_returned() {
         P& p = promise();
         p.template check_value<RETURNED>();
-        if constexpr (std::is_void_v<R>) {
-            destroy(); return;
-        } else if constexpr (non_value<R>) {
-            R r = p.get_returned().get();
+        if constexpr (non_value<R>) {
+            auto&& r = p.get_returned();
             destroy(); return static_cast<R>(r);
         } else if constexpr (reconstructible<R>) {
-            R r = std::move(p.get_returned()).get();
+            R r = std::move(p.get_returned());
             destroy(); return r;
         } else {
             return result_wrapper(transfer());
