@@ -98,6 +98,17 @@ class zygote_promise:
     template <typename D> friend class mixin;
     using enum promise_state;
 
+    template <typename T>
+    static constexpr bool is_ref = std::is_reference_v<T>;
+    template <typename T>
+    static constexpr bool is_lref = std::is_lvalue_reference_v<T>;
+    template <typename T>
+    static constexpr bool is_lcref =
+        is_lref<T> && std::is_const_v<std::remove_reference_t<T>>;
+    template <typename From, typename To>
+    static constexpr bool is_compatible =
+        std::is_convertible_v<std::add_pointer_t<From>, std::add_pointer_t<To>>;
+
     template <promise_state status>
     decltype(auto) get_data()
         { return std::get<std::size_t(status)>(data); }
@@ -167,7 +178,31 @@ public:
     decltype(auto) get_returned() { return get_data<RETURNED>(); }
     decltype(auto) get_error() { return get_data<ERROR>(); }
 
-    void set_yielded(auto&& expr) noexcept {
+    void set_yielded(auto&& expr) noexcept requires (is_ref<Y>) {
+        using Expr = decltype(expr);
+        // When yielded type is reference, yielded object must be "compatible"
+        // with yielded type instead of "convertible" because temporaries
+        // generated in conversion process will not be saved in the coroutine
+        // stack, and is already destroyed after the coroutine is suspended,
+        // which will cause yielded reference to be dangling.
+        static_assert(is_compatible<Expr, Y>,
+            "Passed object is incompatible with yielded type!"
+        );
+        if constexpr (is_lref<Y>) {
+            static_assert(is_lref<Expr> || is_lcref<Y>,
+                "Yielded type is non-const lvalue reference, cannot yield rvalue!"
+            );
+            emplace<YIELDED>(expr);
+        } else {
+            static_assert(!is_lref<Expr>,
+                "Yielded type is rvalue reference, cannot yield lvalue! Manual "
+                "std::move might be needed."
+            );
+            emplace<YIELDED>(std::move(expr));
+        }
+    }
+
+    void set_yielded(auto&& expr) noexcept requires (!is_ref<Y>) {
         if constexpr (std::is_void_v<Y>) { emplace_void<YIELDED>(); }
         else { emplace_expr<YIELDED>(COUTILS_FWD(expr)); }
     }
