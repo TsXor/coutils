@@ -69,24 +69,44 @@ struct as_completed_shim {
     using enum std::memory_order;
 
     struct controller {
-        std::coroutine_handle<> caller;
+        std::coroutine_handle<> caller = nullptr;
         light_lock lock;
         std::atomic<std::size_t> finished = 0, consumed = 0;
-        std::size_t* order;
+        std::span<std::size_t> order;
+
+        template<typename U, std::size_t N>
+        controller(std::array<U, N>& arr) : order(arr) {}
+
+        bool finish(std::size_t id) {
+            bool caller_blocked;
+            {
+                auto guard = std::lock_guard(lock);
+                // here is actually a push operation of a SPSC queue
+                auto v_finished = finished.load(relaxed);
+                auto v_consumed = consumed.load(acquire);
+                caller_blocked = v_consumed == v_finished && caller;
+                order[v_finished] = id;
+                finished.store(v_finished + 1, release);
+            }
+            return caller_blocked;
+        }
+
+        bool consume(std::coroutine_handle<> ch) {
+            bool should_suspend;
+            {
+                // here is actually a pop operation of a SPSC queue
+                auto v_consumed = consumed.load(relaxed);
+                auto v_finished = finished.load(acquire);
+                caller = ch;
+                should_suspend = v_consumed + 1 == v_finished && v_consumed + 1 < order.size();
+                consumed.store(v_consumed + 1, release);
+            }
+            return should_suspend;
+        }
     };
 
     static agent shim(std::size_t id, std::shared_ptr<controller> control) noexcept {
-        bool caller_blocked;
-        {
-            auto guard = std::lock_guard(control->lock);
-            // here is actually a push operation of a SPSC queue
-            auto finished = control->finished.load(relaxed);
-            auto consumed = control->consumed.load(acquire);
-            caller_blocked = consumed == finished && control->caller;
-            control->order[finished] = id; ++finished;
-            control->finished.store(finished, release);
-        }
-        if (caller_blocked) { control->caller.resume(); }
+        if (control->finish(id)) { control->caller.resume(); }
         co_return;
     }
 };
@@ -140,24 +160,15 @@ class as_completed : private _::as_completed_shim {
     bool all_consumed() const { return consumed() == size; }
 
     bool on_suspend(std::coroutine_handle<> ch) {
-        bool should_suspend;
         if (control.use_count() == 0) {
-            control = std::make_shared<controller>();
-            control->order = order.data();
+            control = std::make_shared<controller>(order);
             control->caller = ch;
             storage.launch([&](size_t idx) {
                 return shim(idx, control).transfer();
             });
-            should_suspend = true;
-        } else {
-            // here is actually a pop operation of a SPSC queue
-            auto consumed = control->consumed.load(relaxed);
-            auto finished = control->finished.load(acquire);
-            control->caller = ch; ++consumed;
-            should_suspend = consumed == finished && consumed < size;
-            control->consumed.store(consumed, release);
+            return true;
         }
-        return should_suspend;
+        return control->consume(ch);
     }
 
     decltype(auto) get_result() {
