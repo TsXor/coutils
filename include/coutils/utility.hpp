@@ -488,11 +488,11 @@ public:
 };
 
 /**
- * @brief A simple promise type that returns `void` and ignores exception.
+ * @brief A simple promise type that returns `void` and terminates on exception.
  */
 struct simple_promise {
     void return_void() noexcept {}
-    void unhandled_exception() noexcept {}
+    [[noreturn]] void unhandled_exception() noexcept { std::terminate(); }
 
     decltype(auto) initial_suspend() noexcept
         { return std::suspend_always{}; }

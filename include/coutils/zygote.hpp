@@ -95,7 +95,6 @@ class zygote_promise:
     public mixins::promise_yield<zygote_promise<Y, S, R>, Y>,
     public mixins::promise_return<zygote_promise<Y, S, R>, R>
 {
-    template <typename D> friend class mixin;
     using enum promise_state;
 
     template <typename T>
