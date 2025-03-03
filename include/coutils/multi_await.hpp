@@ -208,15 +208,11 @@ public:
         bool operator==(std::default_sentinel_t) { return ptr->all_consumed(); }
         decltype(auto) operator*() { return ptr->get_result(); }
         iterator& operator++() & { return *this; }
-        iterator operator++() && { return std::move(*this); }
 
         constexpr bool await_ready() const noexcept { return false; }
         decltype(auto) await_suspend(std::coroutine_handle<> ch)
             { return ptr->on_suspend(ch); }
-        iterator& await_resume() & { return *this; }
-        iterator await_resume() && { return std::move(*this); }
-
-        COUTILS_REF_AWAITER_CONV_OVERLOAD
+        void await_resume() {}
     };
 
     decltype(auto) begin() { return iterator(*this); }

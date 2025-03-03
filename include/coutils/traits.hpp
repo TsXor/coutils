@@ -8,6 +8,9 @@
 
 namespace coutils::traits {
 
+template <typename T, typename R = void>
+concept result = std::same_as<R, void> || std::convertible_to<T, R>;
+
 template <typename T>
 struct is_std_co_handle : std::false_type {};
 template <typename Promise>
@@ -26,30 +29,32 @@ template <typename T>
 concept valid_suspend_result =
     std::same_as<T, void> || std::same_as<T, bool> || is_std_co_handle_v<T>;
 
-template <typename T>
-concept awaiter = 
-    requires (T obj) { {obj.await_ready()} -> std::convertible_to<bool>; } &&
-    requires (T obj) { obj.await_resume(); } &&
-    requires (T obj, std::coroutine_handle<> handle)
-        { {obj.await_suspend(handle)} -> valid_suspend_result; };
+template <typename T, typename R = void>
+concept awaiter = requires (T obj, std::coroutine_handle<> handle) {
+    {obj.await_ready()} -> result<bool>;
+    {obj.await_suspend(handle)} -> valid_suspend_result;
+    {obj.await_resume()} -> result<R>;
+};
 
 namespace _ {
 
-template <typename T>
-concept member_co_await =
-    requires (T obj) { {obj.operator co_await()} -> awaiter; };
-template <typename T>
-concept non_member_co_await =
-    requires (T obj) { {operator co_await(static_cast<T&&>(obj))} -> awaiter; };
+template <typename T, typename R = void>
+concept member_co_await = requires (T obj) {
+    {obj.operator co_await()} -> awaiter<R>;
+};
+template <typename T, typename R = void>
+concept non_member_co_await = requires (T obj) {
+    {operator co_await(static_cast<T&&>(obj))} -> awaiter<R>;
+};
 
 } // namespace _
 
-template <typename T>
+template <typename T, typename R = void>
 concept awaiter_convertible =
-    _::non_member_co_await<T> || _::member_co_await<T>;
+    _::non_member_co_await<T, R> || _::member_co_await<T, R>;
 
-template <typename T>
-concept awaitable = awaiter_convertible<T> || awaiter<T>;
+template <typename T, typename R = void>
+concept awaitable = awaiter_convertible<T, R> || awaiter<T, R>;
 
 namespace _ {
 
@@ -70,10 +75,7 @@ struct awaiter_cvt_impl<T, false, true>
 } // namespace _
 
 template <typename T>
-struct awaiter_cvt : _::awaiter_cvt_impl<T> {};
-
-template <typename T>
-using awaiter_cvt_t = typename awaiter_cvt<T>::type;
+using awaiter_cvt_t = typename _::awaiter_cvt_impl<T>::type;
 
 template <typename T>
 using co_await_t = await_resume_t<awaiter_cvt_t<T>>;
@@ -83,9 +85,9 @@ concept can_return =
     (std::is_void_v<R> && requires(P p) { p.return_void(); }) ||
     requires(P p, R r) { p.return_value(r); };
 
-template <typename P, typename Y>
+template <typename P, typename Y, typename S = void>
 concept can_yield =
-    requires(P p, Y y) { {p.yield_value(y)} -> awaitable; };
+    requires(P p, Y y) { {p.yield_value(y)} -> awaitable<S>; };
 
 } // namespace coutils::traits
 

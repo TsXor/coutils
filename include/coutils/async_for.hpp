@@ -2,12 +2,12 @@
 #ifndef __COUTILS_ASYNC_FOR__
 #define __COUTILS_ASYNC_FOR__
 
-#include "coutils/utility.hpp"
+#include "./macros.hpp"
 
 #define _COUTILS_FOR_HEADER(var_begin, var_end, var_obj) \
-    auto var_begin = COUTILS_AWAIT(var_obj.begin()); \
-    auto var_end = COUTILS_AWAIT(var_obj.end()); \
-    for (; var_begin != var_end; co_await ++var_begin)
+    auto var_begin = var_obj.begin(); \
+    auto var_end = var_obj.end(); \
+    for (; (co_await var_begin, var_begin != var_end); ++var_begin)
 
 #define _COUTILS_FOR_IMPL(init, decl, expr, var_begin, var_end, var_obj) \
     { init; auto&& var_obj = expr; \

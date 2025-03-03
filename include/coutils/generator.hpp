@@ -48,7 +48,6 @@ public:
         decltype(auto) operator*() { return yielded(); }
         decltype(auto) operator->() { return std::addressof(*(*this)); }
         iterator& operator++() & { resume(); check_error(); return *this; }
-        iterator operator++() && { resume(); check_error(); return {transfer()}; }
     };
 
     decltype(auto) begin() { return iterator(transfer()); }

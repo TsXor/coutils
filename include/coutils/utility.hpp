@@ -306,46 +306,6 @@ public:
 };
 
 
-/**
- * @brief Makes lvalue/rvalue overload of awaitables work.
- * 
- * According to cppreference, in a `co_await` expression, when obtaining
- * awaiter, "If the expression above is a prvalue, the awaiter object is a
- * temporary materialized from it. Otherwise, if the expression above is a
- * glvalue, the awaiter object is the object to which it refers."
- * 
- * This means the awaiter is always in lvalue state when its methods are
- * called, then rvalue overloads will never be used. To overcome this, here is
- * `ref_awaiter`. It remembers reference type in template parameter and casts
- * container reference to call correct overload. 
- */
-template <traits::awaiter T> requires std::is_reference_v<T>
-class ref_awaiter {
-    ref<T> _ref;
-public:
-    explicit ref_awaiter(T ref) : _ref(COUTILS_FWD(ref)) {}
-    constexpr bool await_ready()
-        { return _ref.get().await_ready(); }
-    constexpr decltype(auto) await_suspend(std::coroutine_handle<> ch)
-        { return _ref.get().await_suspend(ch); }
-    constexpr decltype(auto) await_resume()
-        { return _ref.get().await_resume(); }
-};
-
-template <traits::awaiter T> requires std::is_reference_v<T&&>
-explicit ref_awaiter(T&&) -> ref_awaiter<T&&>;
-
-/**
- * @brief Adds member `co_await` overload that converts `*this` to ref_awaiter.
- * 
- * Paste this macro to public area of your awaitable class, then lvalue/rvalue
- * method overload of awaitables work.
- */
-#define COUTILS_REF_AWAITER_CONV_OVERLOAD \
-    decltype(auto) operator co_await() & { return ref_awaiter(*this); } \
-    decltype(auto) operator co_await() && { return ref_awaiter(std::move(*this)); }
-
-
 template <typename T>
 concept reconstructible =
     std::copy_constructible<T> || std::move_constructible<T>;
@@ -358,34 +318,6 @@ concept reconstructible =
  * as `Y`) or `co_return` (when used as `R`) is disabled.
  */
 struct disable {};
-
-
-/**
- * @brief Wraps a reference as non-suspending awaitable.
- */
-template <typename T> requires std::is_reference_v<T>
-struct immediately {
-    ref<T> _ref;
-public:
-    explicit immediately(T ref) : _ref(COUTILS_FWD(ref)) {}
-    constexpr bool await_ready() const noexcept { return true; }
-    constexpr void await_suspend(std::coroutine_handle<> ch) const noexcept {}
-    constexpr decltype(auto) await_resume() { return _ref.get(); }
-};
-
-template <typename T> requires std::is_reference_v<T&&>
-explicit immediately(T&&) -> immediately<T&&>;
-
-decltype(auto) wrap_as_awaitable(auto&& obj) {
-    if constexpr (traits::awaitable<decltype(obj)>)
-        { return COUTILS_FWD(obj); }
-    else { return immediately(COUTILS_FWD(obj)); }
-}
-
-/**
- * @brief If `expr` is awaitable returns `co_await expr`, else returns `expr`.
- */
-#define COUTILS_AWAIT(expr) (co_await coutils::wrap_as_awaitable(expr))
 
 
 /**

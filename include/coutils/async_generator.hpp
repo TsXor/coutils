@@ -61,15 +61,11 @@ public:
         decltype(auto) operator*() { return yielded(); }
         decltype(auto) operator->() { return std::addressof(*(*this)); }
         iterator& operator++() & { return *this; }
-        iterator operator++() && { return {transfer()}; }
 
         constexpr bool await_ready() const noexcept { return false; }
         decltype(auto) await_suspend(std::coroutine_handle<> ch)
             { promise().caller = ch; return handle(); }
-        iterator& await_resume() & { check_error(); return *this; }
-        iterator await_resume() && { check_error(); return {transfer()}; }
-
-        COUTILS_REF_AWAITER_CONV_OVERLOAD
+        void await_resume() { check_error(); }
     };
 
     decltype(auto) begin() { return iterator(transfer()); }
