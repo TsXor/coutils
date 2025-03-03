@@ -14,9 +14,11 @@ coutils::async_fn<compound> make_compound() {
     co_return coutils::co_result(1, 2, 3);
 }
 
+#if 0
 coutils::async_fn<heavy> make_heavy() {
     co_return coutils::co_result(1, 2, 3);
 }
+#endif
 
 coutils::async_fn<void> test() {
     {
@@ -26,13 +28,15 @@ coutils::async_fn<void> test() {
             << val.a << ' ' << val.b << ' ' << val.c
         << std::endl;
     }
+#if 0
     {
-        // use a non-reconstructible value from a wrapper
+        // non-recontructible values are not supported
         auto val = co_await make_heavy();
         std::cout << "Result of make_heavy: "
             << val->a << ' ' << val->b << ' ' << val->c
         << std::endl;
     }
+#endif
 }
 
 int main() {

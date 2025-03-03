@@ -139,6 +139,11 @@ class zygote_promise:
 
 public:
     static_assert(
+        non_value<R> || reconstructible<R>,
+        "return type should be non_value or reconstructible"
+    );
+
+    static_assert(
         !(std::is_array_v<Y> || std::is_array_v<S> || std::is_array_v<R>),
         "promise cannot hold a C-style array as value, try using std::array "
         "instead"
@@ -292,15 +297,6 @@ public:
         p.template check_value<RECEIVED>();
     }
 
-    class result_wrapper : private handle_manager<P> {
-        using handle_manager<P>::promise;
-    public:
-        using handle_manager<P>::handle_manager;
-        R& get() { return promise().get_returned(); }
-        R& operator*() { return get(); }
-        R* operator->() { return std::addressof(get()); }
-    };
-
     decltype(auto) move_out_returned() {
         P& p = promise();
         p.template check_value<RETURNED>();
@@ -310,8 +306,6 @@ public:
         } else if constexpr (reconstructible<R>) {
             R r = std::move(p.get_returned());
             destroy(); return r;
-        } else {
-            return result_wrapper(transfer());
         }
     }
 };
