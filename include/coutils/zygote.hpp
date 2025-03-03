@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <optional>
 #include <coroutine>
+#include "coutils/value_wrapper.hpp"
 #include "coutils/utility.hpp"
 #include "coutils/traits.hpp"
 

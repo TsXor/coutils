@@ -6,6 +6,7 @@
 #include <mutex>
 #include <memory>
 #include <span>
+#include "coutils/value_wrapper.hpp"
 #include "coutils/utility.hpp"
 #include "coutils/traits.hpp"
 #include "coutils/agent.hpp"
