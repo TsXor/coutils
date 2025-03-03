@@ -1,11 +1,11 @@
 #pragma once
-#ifndef __COUTILS_ASYNC_GENERATOR__
-#define __COUTILS_ASYNC_GENERATOR__
+#ifndef __COUTILS_CRT_ASYNC_GENERATOR__
+#define __COUTILS_CRT_ASYNC_GENERATOR__
 
 #include <iterator>
-#include "coutils/zygote.hpp"
+#include "./zygote.hpp"
 
-namespace coutils {
+namespace coutils::crt {
 
 template <typename Y, typename S>
 struct async_generator_promise: zygote_promise<async_generator_promise<Y, S>, Y, S, void> {
@@ -52,14 +52,14 @@ public:
     decltype(auto) end() const { return std::default_sentinel; }
 };
 
-} // namespace coutils
+} // namespace coutils::crt
 
 template <typename Y, typename S, typename... Args>
-struct std::coroutine_traits<coutils::async_generator<Y, S>, Args...> {
+struct std::coroutine_traits<coutils::crt::async_generator<Y, S>, Args...> {
     using promise_type = coutils::promise_bridge<
-        coutils::async_generator<Y, S>,
-        coutils::async_generator_promise<Y, S>
+        coutils::crt::async_generator<Y, S>,
+        coutils::crt::async_generator_promise<Y, S>
     >;
 };
 
-#endif // __COUTILS_ASYNC_GENERATOR__
+#endif // __COUTILS_CRT_ASYNC_GENERATOR__

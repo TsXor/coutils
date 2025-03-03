@@ -3,7 +3,7 @@
 #define __COUTILS_WAIT__
 
 #include <atomic>
-#include "coutils/agent.hpp"
+#include "coutils/crt/agent.hpp"
 #include "coutils/traits.hpp"
 
 namespace coutils {
@@ -19,7 +19,7 @@ static inline decltype(auto) wait(T&& awaitable) {
     {
         using enum std::memory_order;
         std::atomic_flag completed;
-        auto set_flag = [&]() -> agent {
+        auto set_flag = [&]() -> crt::agent {
             completed.test_and_set(release);
             completed.notify_all(); co_return;
         };

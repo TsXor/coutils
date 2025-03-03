@@ -9,7 +9,7 @@
 #include "coutils/value_wrapper.hpp"
 #include "coutils/utility.hpp"
 #include "coutils/traits.hpp"
-#include "coutils/agent.hpp"
+#include "coutils/crt/agent.hpp"
 
 namespace coutils {
 
@@ -106,7 +106,7 @@ struct as_completed_shim {
         }
     };
 
-    static agent shim(std::size_t id, std::shared_ptr<controller> control) noexcept {
+    static crt::agent shim(std::size_t id, std::shared_ptr<controller> control) noexcept {
         if (control->finish(id)) { control->caller.resume(); }
         co_return;
     }
@@ -235,7 +235,7 @@ struct all_completed_shim {
         std::atomic<std::size_t> count;
     };
 
-    static agent shim(size_t id, controller& control) noexcept {
+    static crt::agent shim(size_t id, controller& control) noexcept {
         // When we are the last one, resume parent.
         if (--control.count == 0) { control.caller.resume(); }
         co_return;

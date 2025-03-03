@@ -1,15 +1,15 @@
 #pragma once
-#ifndef __COUTILS_ZYGOTE__
-#define __COUTILS_ZYGOTE__
+#ifndef __COUTILS_CRT_ZYGOTE__
+#define __COUTILS_CRT_ZYGOTE__
 
 #include <stdexcept>
 #include <optional>
 #include <coroutine>
-#include "coutils/value_wrapper.hpp"
-#include "coutils/utility.hpp"
-#include "coutils/traits.hpp"
+#include "../value_wrapper.hpp"
+#include "../utility.hpp"
+#include "../traits.hpp"
 
-namespace coutils {
+namespace coutils::crt {
 
 enum class promise_state { PENDING, YIELDED, RECEIVED, RETURNED, ERROR };
 
@@ -295,6 +295,6 @@ public:
     }
 };
 
-} // namespace coutils
+} // namespace coutils::crt
 
-#endif // __COUTILS_ZYGOTE__
+#endif // __COUTILS_CRT_ZYGOTE__

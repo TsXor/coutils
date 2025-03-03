@@ -1,10 +1,10 @@
 #pragma once
-#ifndef __COUTILS_ASYNC_FN__
-#define __COUTILS_ASYNC_FN__
+#ifndef __COUTILS_CRT_ASYNC_FN__
+#define __COUTILS_CRT_ASYNC_FN__
 
-#include "coutils/zygote.hpp"
+#include "./zygote.hpp"
 
-namespace coutils {
+namespace coutils::crt {
 
 template <typename T>
 struct async_fn_promise: zygote_promise<async_fn_promise<T>, zygote_disable, zygote_disable, T> {
@@ -40,14 +40,14 @@ public:
     decltype(auto) await_resume() { return _Ops::move_out_returned(handle); }
 };
 
-} // namespace coutils
+} // namespace coutils::crt
 
 template <typename T, typename... Args>
-struct std::coroutine_traits<coutils::async_fn<T>, Args...> {
+struct std::coroutine_traits<coutils::crt::async_fn<T>, Args...> {
     using promise_type = coutils::promise_bridge<
-        coutils::async_fn<T>,
-        coutils::async_fn_promise<T>
+        coutils::crt::async_fn<T>,
+        coutils::crt::async_fn_promise<T>
     >;
 };
 
-#endif // __COUTILS_ASYNC_FN__
+#endif // __COUTILS_CRT_ASYNC_FN__

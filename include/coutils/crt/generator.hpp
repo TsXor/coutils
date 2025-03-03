@@ -1,10 +1,11 @@
 #pragma once
-#ifndef __COUTILS_GENERATOR__
-#define __COUTILS_GENERATOR__
+#ifndef __COUTILS_CRT_GENERATOR__
+#define __COUTILS_CRT_GENERATOR__
 
-#include "coutils/zygote.hpp"
+#include <iterator>
+#include "./zygote.hpp"
 
-namespace coutils {
+namespace coutils::crt {
 
 template <typename Y, typename S>
 struct generator_promise : zygote_promise<generator_promise<Y, S>, Y, S, void> {
@@ -42,14 +43,14 @@ public:
     decltype(auto) end() const { return std::default_sentinel; }
 };
 
-} // namespace coutils
+} // namespace coutils::crt
 
 template <typename Y, typename S, typename... Args>
-struct std::coroutine_traits<coutils::generator<Y, S>, Args...> {
+struct std::coroutine_traits<coutils::crt::generator<Y, S>, Args...> {
     using promise_type = coutils::promise_bridge<
-        coutils::generator<Y, S>,
-        coutils::generator_promise<Y, S>
+        coutils::crt::generator<Y, S>,
+        coutils::crt::generator_promise<Y, S>
     >;
 };
 
-#endif // __COUTILS_GENERATOR__
+#endif // __COUTILS_CRT_GENERATOR__

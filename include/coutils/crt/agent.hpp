@@ -1,11 +1,11 @@
 #pragma once
-#ifndef __COUTILS_AGENT__
-#define __COUTILS_AGENT__
+#ifndef __COUTILS_CRT_AGENT__
+#define __COUTILS_CRT_AGENT__
 
-#include "coutils/utility.hpp"
-#include "coutils/traits.hpp"
+#include "../utility.hpp"
+#include "../traits.hpp"
 
-namespace coutils {
+namespace coutils::crt {
 
 struct agent_promise {
     void return_void() noexcept {}
@@ -36,14 +36,14 @@ struct agent {
     agent(agent_promise& p) : handle(decltype(handle)::from_promise(p)) {}
 };
 
-} // namespace coutils
+} // namespace coutils::crt
 
 template <typename... Args>
-struct std::coroutine_traits<coutils::agent, Args...> {
+struct std::coroutine_traits<coutils::crt::agent, Args...> {
     using promise_type = coutils::promise_bridge<
-        coutils::agent,
-        coutils::agent_promise
+        coutils::crt::agent,
+        coutils::crt::agent_promise
     >;
 };
 
-#endif // __COUTILS_AGENT__
+#endif // __COUTILS_CRT_AGENT__
