@@ -165,7 +165,7 @@ class as_completed : private _::as_completed_shim {
             control = std::make_shared<controller>(order);
             control->caller = ch;
             storage.launch([&](size_t idx) {
-                return shim(idx, control).transfer();
+                return shim(idx, control).handle;
             });
             return true;
         }
@@ -288,7 +288,7 @@ public:
         control->caller = ch;
         control->count = size;
         storage.launch([&](size_t idx) {
-            return shim(idx, *control).transfer();
+            return shim(idx, *control).handle;
         });
     }
 

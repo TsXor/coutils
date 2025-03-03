@@ -2,73 +2,53 @@
 #ifndef __COUTILS_ASYNC_GENERATOR__
 #define __COUTILS_ASYNC_GENERATOR__
 
+#include <iterator>
 #include "coutils/zygote.hpp"
 
 namespace coutils {
 
 template <typename Y, typename S>
-struct async_generator_promise:
-    zygote_promise<Y, S, void>,
-    mixins::promise_yield<async_generator_promise<Y, S>, Y>
-{
+struct async_generator_promise: zygote_promise<async_generator_promise<Y, S>, Y, S, void> {
     std::coroutine_handle<> caller = {};
-
     decltype(auto) final_suspend() noexcept
         { return transfer_to_handle{std::exchange(caller, {})}; }
-
     decltype(auto) yield_suspend(std::coroutine_handle<>)
         { return std::exchange(caller, {}); }
-
-    using mixins::promise_yield<async_generator_promise<Y, S>, Y>::yield_value;
 };
 
 template <typename Y, typename S>
 using async_generator_handle = std::coroutine_handle<async_generator_promise<Y, S>>;
 
-namespace _ {
-
-template <typename Y, typename S>
-using async_generator_base = zygote<Y, S, void, async_generator_promise<Y, S>>;
-
-} // namespace _
-
 template <typename Y, typename S = void>
-class async_generator : private _::async_generator_base<Y, S> {
-    using _Base = _::async_generator_base<Y, S>;
-    using _Base::transfer;
+class async_generator {
+    using _Ops = zygote_ops<async_generator_promise<Y, S>>;
+    owning_handle<async_generator_promise<Y, S>> handle;
 
 public:
-    using _Base::_Base;
+    async_generator(async_generator_promise<Y, S>& p) : handle(p) {}
 
-    class iterator : private _Base {
+    class iterator {
         using enum promise_state;
-        using typename _Base::handle_type;
-
-        using _Base::promise;
-        using _Base::handle;
-        using _Base::transfer;
-        using _Base::status;
-        using _Base::check_error;
-        using _Base::yielded;
+        using _Ops = zygote_ops<async_generator_promise<Y, S>>;
+        owning_handle<async_generator_promise<Y, S>> handle;
 
     public:
-        iterator(handle_type handle) : _Base(handle) {}
-        iterator(const iterator&) = delete;
-        iterator(iterator&&) = default;
+        iterator(decltype(handle)&& h) noexcept : handle(std::move(h)) {}
 
-        using _Base::send;
-        bool operator==(std::default_sentinel_t) { return status() == RETURNED; }
-        decltype(auto) operator*() { return yielded(); }
+        bool operator==(std::default_sentinel_t) noexcept
+            { return _Ops::status(handle) == RETURNED; }
+        decltype(auto) operator*()
+            { _Ops::check_error(handle); return _Ops::yielded(handle); }
         decltype(auto) operator->() { return std::addressof(*(*this)); }
-        iterator& operator++() & { return *this; }
+        iterator& operator++() & noexcept { return *this; }
 
         constexpr bool await_ready() const noexcept { return false; }
-        decltype(auto) await_suspend(std::coroutine_handle<> ch)
-            { promise().caller = ch; return handle(); }
-        void await_resume() { check_error(); }
+        std::coroutine_handle<> await_suspend(std::coroutine_handle<> ch)
+            { handle.promise().caller = ch; return handle; }
+        void await_resume() {}
     };
 
-    decltype(auto) begin() { return iterator(transfer()); }
+    decltype(auto) begin() { return iterator(std::move(handle)); }
     decltype(auto) end() const { return std::default_sentinel; }
 };
 

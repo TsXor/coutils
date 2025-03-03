@@ -7,24 +7,18 @@
 namespace coutils {
 
 template <typename T>
-struct task_promise: zygote_promise<disable, disable, T> {};
+struct task_promise: zygote_promise<task_promise<T>, zygote_disable, zygote_disable, T> {};
 
 template <typename T>
 using task_handle = std::coroutine_handle<task_promise<T>>;
-
-namespace _ {
-
-template <typename T>
-using task_base = zygote<disable, disable, T, task_promise<T>>;
-
-} // namespace _
 
 /**
  * @brief A manipulatable coroutine wrapper.
  */
 template <typename T>
-struct task : _::task_base<T> {
-    using _::task_base<T>::task_base;
+struct task {
+    owning_handle<task_promise<T>> handle;
+    task(task_promise<T>& p) : handle(p) {}
 };
 
 } // namespace coutils

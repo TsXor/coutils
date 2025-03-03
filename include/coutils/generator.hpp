@@ -7,50 +7,38 @@
 namespace coutils {
 
 template <typename Y, typename S>
-struct generator_promise : zygote_promise<Y, S, void> {
+struct generator_promise : zygote_promise<generator_promise<Y, S>, Y, S, void> {
     void await_transform(auto&&) = delete;
 };
 
 template <typename Y, typename S>
 using generator_handle = std::coroutine_handle<generator_promise<Y, S>>;
 
-namespace _ {
-
-template <typename Y, typename S>
-using generator_base = zygote<Y, S, void, generator_promise<Y, S>>;
-
-} // namespace _
-
 template <typename Y, typename S = void>
-class generator : private _::generator_base<Y, S> {
-    using _Base = _::generator_base<Y, S>;
-    using _Base::transfer;
+class generator {
+    using _Ops = zygote_ops<generator_promise<Y, S>>;
+    owning_handle<generator_promise<Y, S>> handle;
 
 public:
-    using _Base::_Base;
+    generator(generator_promise<Y, S>& p) : handle(p) {}
 
-    class iterator : private _Base {
+    class iterator {
         using enum promise_state;
-        using typename _Base::handle_type;
-        using _Base::transfer;
-        using _Base::status;
-        using _Base::resume;
-        using _Base::check_error;
-        using _Base::yielded;
+        using _Ops = zygote_ops<generator_promise<Y, S>>;
+        owning_handle<generator_promise<Y, S>> handle;
 
     public:
-        iterator(handle_type handle) : _Base(handle) { ++(*this); }
-        iterator(const iterator&) = delete;
-        iterator(iterator&&) = default;
+        iterator(decltype(handle)&& h) noexcept : handle(std::move(h)) {}
 
-        using _Base::send;
-        bool operator==(std::default_sentinel_t) { return status() == RETURNED; }
-        decltype(auto) operator*() { return yielded(); }
+        bool operator==(std::default_sentinel_t) noexcept
+            { return _Ops::status(handle) == RETURNED; }
+        decltype(auto) operator*()
+            { _Ops::check_error(handle); return _Ops::yielded(handle); }
         decltype(auto) operator->() { return std::addressof(*(*this)); }
-        iterator& operator++() & { resume(); check_error(); return *this; }
+        iterator& operator++() & { handle.resume(); return *this; }
     };
 
-    decltype(auto) begin() { return iterator(transfer()); }
+    decltype(auto) begin() { handle.resume(); return iterator(std::move(handle)); }
     decltype(auto) end() const { return std::default_sentinel; }
 };
 

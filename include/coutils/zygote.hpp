@@ -30,6 +30,14 @@ public:
         { return promise.get().yield_resume(); }
 };
 
+/**
+ * @brief An empty class tag.
+ * 
+ * When used in `zygote_promise`, it represents `co_yield` (when used
+ * as `Y`) or `co_return` (when used as `R`) is disabled.
+ */
+struct zygote_disable {};
+
 namespace mixins {
 
 /**
@@ -54,7 +62,7 @@ public:
 };
 
 template <typename D>
-struct promise_return<D, disable> {};
+struct promise_return<D, zygote_disable> {};
 
 
 /**
@@ -81,7 +89,7 @@ public:
 };
 
 template <typename D>
-struct promise_yield<D, disable> {};
+struct promise_yield<D, zygote_disable> {};
 
 } // namespace mixins
 
@@ -91,10 +99,10 @@ struct promise_yield<D, disable> {};
  * This class provides a 5-state promise that is capable of most coroutine
  * features and properly handles exception.
  */
-template <typename Y, typename S, typename R>
+template <typename D, typename Y, typename S, typename R>
 class zygote_promise:
-    public mixins::promise_yield<zygote_promise<Y, S, R>, Y>,
-    public mixins::promise_return<zygote_promise<Y, S, R>, R>
+    public mixins::promise_yield<D, Y>,
+    public mixins::promise_return<D, R>
 {
     using enum promise_state;
 
@@ -151,7 +159,7 @@ public:
     );
 
     static_assert(
-        std::is_same_v<Y, disable> == std::is_same_v<S, disable>,
+        std::is_same_v<Y, zygote_disable> == std::is_same_v<S, zygote_disable>,
         "yield and send must be both or neither disabled"
     );
 
@@ -250,63 +258,39 @@ public:
     }
 };
 
-
-template <typename Y, typename S, typename R>
-using zygote_handle = std::coroutine_handle<zygote_promise<Y, S, R>>;
-
-
 /**
- * @brief Wraps a handle of `zygote_promise`.
- * 
- * The third template parameter is for extending, replace it with subclass.
+ * @brief A set of operations on `zygote_promise`.
  */
-template <typename Y, typename S, typename R,
-    std::derived_from<zygote_promise<Y, S, R>> P = zygote_promise<Y, S, R>
-> class zygote : public handle_manager<P> {
+template <typename P>
+class zygote_ops {
     using enum promise_state;
+    using _Handle = std::coroutine_handle<P>;
+    using Y = typename P::yield_type;
+    using S = typename P::send_type;
+    using R = typename P::return_type;
 
 public:
-    using typename handle_manager<P>::handle_type;
-    using yield_type = Y;
-    using send_type = S;
-    using return_type = R;
+    static promise_state status(_Handle handle) noexcept { return handle.promise().status(); }
 
-    using handle_manager<P>::handle_manager;
-    using handle_manager<P>::promise;
-    using handle_manager<P>::handle;
-    using handle_manager<P>::transfer;
-    using handle_manager<P>::destroy;
-    using handle_manager<P>::done;
-    using handle_manager<P>::resume;
+    static decltype(auto) yielded(_Handle handle) { return handle.promise().get_yielded(); }
+    static decltype(auto) returned(_Handle handle) { return handle.promise().get_returned(); }
+    static void check_error(_Handle handle) { handle.promise().check_error(); }
 
-    promise_state status() noexcept { return promise().status(); }
-
-    template <promise_state state>
-#ifdef DEBUG
-    void assert_state() { promise().template check_value<state>(); }
-#else
-    void assert_state() {}
-#endif
-
-    decltype(auto) yielded() { return promise().get_yielded(); }
-    decltype(auto) returned() { return promise().get_returned(); }
-    void check_error() { promise().check_error(); }
-
-    void send(auto&&... args) requires (!std::is_void_v<S>) {
-        P& p = promise();
+    static void send(_Handle handle, auto&&... args) requires (!std::is_void_v<S>) {
+        P& p = handle.promise();
         p.set_received(COUTILS_FWD(args)...);
         p.template check_value<RECEIVED>();
     }
 
-    decltype(auto) move_out_returned() {
-        P& p = promise();
+    static decltype(auto) move_out_returned(_Handle handle) {
+        P& p = handle.promise();
         p.template check_value<RETURNED>();
         if constexpr (non_value<R>) {
             auto&& r = p.get_returned();
-            destroy(); return static_cast<R>(r);
+            return static_cast<R>(r);
         } else if constexpr (reconstructible<R>) {
             R r = std::move(p.get_returned());
-            destroy(); return r;
+            return r;
         }
     }
 };

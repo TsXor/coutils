@@ -58,18 +58,18 @@ concept awaitable = awaiter_convertible<T, R> || awaiter<T, R>;
 
 namespace _ {
 
-template <typename T, bool = member_co_await<T>, bool = non_member_co_await<T>>
-struct awaiter_cvt_impl {};
-
 template <typename T>
-struct awaiter_cvt_impl<T, false, false> { using type = T&&; };
+struct awaiter_cvt_impl;
 
-template <typename T>
-struct awaiter_cvt_impl<T, true, false>
+template <typename T> requires awaiter<T>
+struct awaiter_cvt_impl<T> { using type = T&&; };
+
+template <typename T> requires member_co_await<T>
+struct awaiter_cvt_impl<T>
     { using type = decltype(std::declval<T>().operator co_await()); };
 
-template <typename T>
-struct awaiter_cvt_impl<T, false, true>
+template <typename T> requires non_member_co_await<T>
+struct awaiter_cvt_impl<T>
     { using type = decltype(operator co_await(std::declval<T&&>())); };
 
 } // namespace _

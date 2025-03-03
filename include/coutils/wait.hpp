@@ -25,7 +25,7 @@ static inline decltype(auto) wait(T&& awaitable) {
         };
         bool suspended = ops::await_suspend(
             COUTILS_FWD(awaiter),
-            set_flag().transfer()
+            set_flag().handle
         );
         if (suspended) { completed.wait(false, acquire); }
     }

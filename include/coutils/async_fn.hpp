@@ -7,7 +7,7 @@
 namespace coutils {
 
 template <typename T>
-struct async_fn_promise: zygote_promise<disable, disable, T> {
+struct async_fn_promise: zygote_promise<async_fn_promise<T>, zygote_disable, zygote_disable, T> {
     std::coroutine_handle<> caller = {};
     decltype(auto) final_suspend() noexcept
         { return transfer_to_handle{std::exchange(caller, {})}; }
@@ -15,13 +15,6 @@ struct async_fn_promise: zygote_promise<disable, disable, T> {
 
 template <typename T>
 using async_fn_handle = std::coroutine_handle<async_fn_promise<T>>;
-
-namespace _ {
-
-template <typename T>
-using async_fn_base = zygote<disable, disable, T, async_fn_promise<T>>;
-
-} // namespace _
 
 /**
  * @brief Wraps coroutine as a lazy async function.
@@ -34,20 +27,17 @@ using async_fn_base = zygote<disable, disable, T, async_fn_promise<T>>;
  *       reference of returned object can be obtained.
  */
 template <typename T>
-class async_fn : private _::async_fn_base<T> {
-    using _Base = _::async_fn_base<T>;
-    using enum promise_state;
-    using _Base::handle;
-    using _Base::promise;
-    using _Base::move_out_returned;
+class async_fn {
+    using _Ops = zygote_ops<async_fn_promise<T>>;
+    owning_handle<async_fn_promise<T>> handle;
 
 public:
-    using _Base::_Base;
+    async_fn(async_fn_promise<T>& p) : handle(p) {}
 
     constexpr bool await_ready() const noexcept { return false; }
-    decltype(auto) await_suspend(std::coroutine_handle<> ch)
-        { promise().caller = ch; return handle(); }
-    decltype(auto) await_resume() { return move_out_returned(); }
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> ch)
+        { handle.promise().caller = ch; return handle; }
+    decltype(auto) await_resume() { return _Ops::move_out_returned(handle); }
 };
 
 } // namespace coutils

@@ -2,6 +2,7 @@
 #ifndef __COUTILS_UTILITY__
 #define __COUTILS_UTILITY__
 
+#include <cstddef>
 #include <utility>
 #include <type_traits>
 #include <atomic>
@@ -48,15 +49,6 @@ public:
     constexpr bool try_lock() noexcept { return true; }
     auto ref() noexcept { return empty_lock(); }
 };
-
-
-/**
- * @brief An empty class tag.
- * 
- * Currently, when used in `zygote_promise`, it represents `co_yield` (when used
- * as `Y`) or `co_return` (when used as `R`) is disabled.
- */
-struct disable {};
 
 
 /**
@@ -126,49 +118,42 @@ auto handle_cast(std::coroutine_handle<> h) -> std::coroutine_handle<P>
     { return std::coroutine_handle<P>::from_address(h.address()); }
 
 /**
- * @brief A resource managing wrapper of `std::coroutine_handle<P>`.
+ * @brief An owning version of `std::coroutine_handle<P>`.
  */
 template <typename P = void>
-class handle_manager {
+class owning_handle {
     using _Handle = std::coroutine_handle<P>;
+    using _ErasedHandle = std::coroutine_handle<>;
     _Handle _handle;
 
 public:
     using handle_type = _Handle;
 
-    explicit handle_manager() : _handle({}) {}
-    explicit handle_manager(_Handle handle): _handle(handle) {}
-    explicit handle_manager(P& promise):
+    owning_handle() noexcept : _handle() {}
+    owning_handle(std::nullptr_t) noexcept : _handle(nullptr) {}
+    owning_handle(_Handle handle) noexcept : _handle(handle) {}
+    owning_handle(P& promise):
         _handle(_Handle::from_promise(promise)) {}
-    ~handle_manager() { destroy(); }
+    ~owning_handle() { destroy(); }
+    owning_handle& operator=(std::nullptr_t) noexcept
+        { _handle = nullptr; return *this; }
 
-    handle_manager(const handle_manager<P>&) = delete;
-    handle_manager<P>& operator=(const handle_manager<P>&) = delete;
-    handle_manager(handle_manager<P>&& other) noexcept :
+    owning_handle(const owning_handle&) = delete;
+    owning_handle& operator=(const owning_handle&) = delete;
+    owning_handle(owning_handle&& other) noexcept :
         _handle(std::exchange(other._handle, {})) {}
-    handle_manager<P>& operator=(handle_manager<P>&& other) noexcept
+    owning_handle& operator=(owning_handle&& other) noexcept
         { destroy(); _handle = std::exchange(other._handle, {}); }
 
-    P& promise() { return _handle.promise(); }
-    bool empty() { return !_handle; }
-    _Handle handle() noexcept { return _handle; }
+    operator _Handle() const noexcept { return _handle; }
+    operator _ErasedHandle() const noexcept { return _handle; }
+    P& promise() const { return _handle.promise(); }
+    explicit operator bool() const noexcept { return static_cast<bool>(_handle); }
+    _Handle handle() const noexcept { return _handle; }
     _Handle transfer() noexcept { return std::exchange(_handle, {}); }
     void destroy() { if (_handle) { transfer().destroy(); } }
-    bool done() { return _handle.done(); }
-    void resume() { _handle.resume(); }
-};
-
-/**
- * @brief A simple promise type that returns `void` and terminates on exception.
- */
-struct simple_promise {
-    void return_void() noexcept {}
-    [[noreturn]] void unhandled_exception() noexcept { std::terminate(); }
-
-    decltype(auto) initial_suspend() noexcept
-        { return std::suspend_always{}; }
-    decltype(auto) final_suspend() noexcept
-        { return std::suspend_always{}; }
+    bool done() const noexcept { return _handle.done(); }
+    void resume() const { _handle.resume(); }
 };
 
 
